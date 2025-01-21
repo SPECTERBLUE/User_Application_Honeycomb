@@ -1,11 +1,10 @@
-from chirpstack_api import api
 import grpc
-
-# ChirpStack gRPC Configuration
-CHIRPSTACK_HOST = "localhost:8088"  # Ensure this is the correct ChirpStack gRPC server address
-API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjaGlycHN0YWNrIiwiaXNzIjoiY2hpcnBzdGFjayIsInN1YiI6IjM5NWE4ZWFjLTc5N2YtNDIzYy04ODM2LTgwMGU0MjI1NjNlZiIsInR5cCI6ImtleSJ9.19X5iDaI6PgQKuBRq12ytyF-iqezGlSovirKAz78x-o"  # Replace with your ChirpStack API token
-APPLICATION_ID = "41a744f9-7e86-4d71-9d5a-bcb5da6ded0d"  # Replace with your ChirpStack Application ID
-
+import logging
+from chirpstack_api import api
+import config 
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger()
 
 def get_devices_as_dict():
     """
@@ -16,36 +15,37 @@ def get_devices_as_dict():
     """
     # Establish gRPC connection
     try:
-        channel = grpc.insecure_channel(CHIRPSTACK_HOST)
-        auth_token = [("authorization", "Bearer %s" % API_TOKEN)]
+        channel = grpc.insecure_channel(config.CHIRPSTACK_HOST)
+        auth_token = [("authorization", "Bearer %s" % config.API_TOKEN)]
         
         # Create service stub for DeviceService
         device_service = api.DeviceServiceStub(channel=channel)
-        print("gRPC connection established.")
+        logger.info("gRPC connection established.")
     except grpc.RpcError as e:
-        print(f"Error establishing gRPC connection: {e.details()}")
+        logger.error(f"Error establishing gRPC connection: {e.details()}")
+        logger.error(f"Status code: {e.code()}")
         return {}
 
     # Dictionary to store devices
     devices_dict = {}
-    offset = 0
-    limit = 100  # Number of devices to fetch per request
+    offset = config.OFFSET
+    limit = config.LIMIT  # Number of devices to fetch per request
 
     try:
         while True:
             # Request device list with pagination and the application_id
-            request = api.ListDevicesRequest(application_id=APPLICATION_ID, limit=limit, offset=offset)
-            print(f"Fetching devices with offset {offset} and limit {limit}")
+            request = api.ListDevicesRequest(application_id=config.APPLICATION_ID, limit=limit, offset=offset)
+            logger.info(f"Fetching devices with offset {offset} and limit {limit}")
             
             # Make gRPC call
             response = device_service.List(request, metadata=auth_token)
 
             # Log the response length
-            print(f"Response received: {len(response.result)} devices found.")
+            logger.info(f"Response received: {len(response.result)} devices found.")
 
             # Process each device in the response
             for device in response.result:
-                print(f"Processing device: {device.name}")
+                logger.info(f"Processing device: {device.name}")
                 devices_dict[device.name] = {
                     "euid": device.dev_eui,
                     "description": device.description,
@@ -63,14 +63,23 @@ def get_devices_as_dict():
             # Increment offset for the next page
             offset += limit
 
-        print(f"Fetched {len(devices_dict)} devices from ChirpStack.")
+            # Check if the pagination has reached the maximum limit
+            if offset >= config.MAX_DEVICES:
+                logger.warning("Reached maximum pagination limit.")
+                break
+
+        # Validate if devices were found
+        if not devices_dict:
+            logger.warning("No devices found for the given Application ID.")
+        
+        logger.info(f"Fetched {len(devices_dict)} devices from ChirpStack.")
         return devices_dict
 
     except grpc.RpcError as e:
-        print(f"Error fetching devices: {e.details()}")
+        logger.error(f"Error fetching devices: {e.details()}")
         return {}
 
 
 if __name__ == "__main__":
     devices = get_devices_as_dict()
-    print("Devices:", devices)
+    logger.info("Devices: %s", devices)
