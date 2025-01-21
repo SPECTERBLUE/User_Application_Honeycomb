@@ -70,7 +70,7 @@ def get_devices_as_dict():
         print(f"Error fetching devices: {e.details()}")
         return {}
 
-# Example usage
+
 if __name__ == "__main__":
     devices = get_devices_as_dict()
     print("Devices:", devices)
