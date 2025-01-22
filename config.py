@@ -7,5 +7,5 @@ APPLICATION_ID = "41a744f9-7e86-4d71-9d5a-bcb5da6ded0d"  # Replace with your Chi
 
 # Pagination Configuration
 MAX_DEVICES = 1000
-LIMIT = 100
+LIMIT = 10
 OFFSET = 0

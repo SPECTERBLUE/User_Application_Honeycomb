@@ -15,8 +15,11 @@ def main():
         auth_token = [("authorization", f"Bearer {config.API_TOKEN}")]
         device_service_stub = api.DeviceServiceStub(channel=channel)
         logger.info("gRPC connection established.")
-    except Exception as e:
+    except grpc.RpcError as e:
         logger.error(f"Failed to establish gRPC connection: {str(e)}")
+        return
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while connecting: {str(e)}")
         return
 
     # Initialize the DeviceFetcher class
@@ -24,7 +27,10 @@ def main():
 
     # Fetch devices as a dictionary
     devices = device_fetcher.get_devices_as_dict()
-    logger.info(f"Devices: {devices}")
+    if "error" in devices:
+        logger.error(f"Error: {devices['error']}, Message: {devices['message']}")
+    else:
+        logger.info(f"Devices: {devices}")
 
 
 if __name__ == "__main__":
