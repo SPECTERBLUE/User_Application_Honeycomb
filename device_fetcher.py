@@ -29,10 +29,12 @@ class DeviceFetcher:
         self.limit = config.LIMIT
         self.max_devices = config.MAX_DEVICES
 
-
-    def get_devices_as_dict(self):
+    def get_devices_as_dict(self, application_id):
         """
-        Fetches all devices from ChirpStack using the gRPC API with pagination.
+        Fetches all devices for a specific application ID from ChirpStack using the gRPC API with pagination.
+
+        Args:
+            application_id (str): The ID of the application for which devices should be fetched.
 
         Returns:
             dict: A dictionary with device names as keys and metadata as values.
@@ -44,7 +46,7 @@ class DeviceFetcher:
             while True:
                 # Request device list with pagination
                 request = api.ListDevicesRequest(
-                    application_id=config.APPLICATION_ID,
+                    application_id=application_id,
                     limit=self.limit,
                     offset=self.offset
                 )
