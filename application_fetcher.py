@@ -13,6 +13,12 @@ class ApplicationFetcher:
         Args:
             application_service_stub (api.ApplicationServiceStub): gRPC service stub for application operations.
         """
+        # Validate OFFSET, LIMIT, and MAX_APPLICATIONS
+        if config.LIMIT is None or config.OFFSET is None:
+            raise ValueError("Offset and limit should be configured in the config.")
+        if config.LIMIT <=0 or config.OFFSET<0 or config.MAX_APPLICATIONS<=0:
+            raise ValueError("LIMIT must be a positive integer,OFFSET must be a non-negative integer,MAX_APPLICATIONS must be a positive integer.")
+        
         self.application_service_stub = application_service_stub
         self.offset = config.OFFSET
         self.limit = config.LIMIT

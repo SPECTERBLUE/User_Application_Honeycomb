@@ -22,6 +22,8 @@ class DeviceFetcher:
         # Validate OFFSET and LIMIT
         if config.LIMIT is None or config.OFFSET is None:
             raise ValueError("Offset and limit should be configured in the config.")
+        if config.LIMIT <=0 or config.OFFSET<0 or config.MAX_DEVICES<=0:
+            raise ValueError("LIMIT must be a positive integer,OFFSET must be a non-negative integer,MAX_DEVICES must be a positive integer.")
         
         self.device_service_stub = device_service_stub
         self.auth_token = auth_token
