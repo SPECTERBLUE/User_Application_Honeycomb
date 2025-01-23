@@ -22,6 +22,8 @@ class DeviceFetcher:
         # Validate OFFSET and LIMIT
         if config.LIMIT is None or config.OFFSET is None:
             raise ValueError("Offset and limit should be configured in the config.")
+        if config.LIMIT <=0 or config.OFFSET<0 or config.MAX_DEVICES<=0:
+            raise ValueError("LIMIT must be a positive integer,OFFSET must be a non-negative integer,MAX_DEVICES must be a positive integer.")
         
         self.device_service_stub = device_service_stub
         self.auth_token = auth_token
@@ -29,10 +31,12 @@ class DeviceFetcher:
         self.limit = config.LIMIT
         self.max_devices = config.MAX_DEVICES
 
-
-    def get_devices_as_dict(self):
+    def get_devices_as_dict(self, application_id):
         """
-        Fetches all devices from ChirpStack using the gRPC API with pagination.
+        Fetches all devices for a specific application ID from ChirpStack using the gRPC API with pagination.
+
+        Args:
+            application_id (str): The ID of the application for which devices should be fetched.
 
         Returns:
             dict: A dictionary with device names as keys and metadata as values.
@@ -44,7 +48,7 @@ class DeviceFetcher:
             while True:
                 # Request device list with pagination
                 request = api.ListDevicesRequest(
-                    application_id=config.APPLICATION_ID,
+                    application_id=application_id,
                     limit=self.limit,
                     offset=self.offset
                 )
