@@ -10,6 +10,18 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def validate_config():
+    """
+    Validates the required configuration parameters.
+    Raises:
+        ValueError: If any required configuration is missing.
+    """
+
+    if not config.CHIRPSTACK_HOST:
+        raise ValueError("CHIRPSTACK_HOST must be defined in the configuration.")
+    if not config.AUTH_METADATA:
+        raise ValueError("AUTH_METADATA must be defined in the configuration.")
+
 def main():
     """
     Main execution function that sets up gRPC connections, fetches applications, and devices.
@@ -32,7 +44,7 @@ def main():
         tenant_ids = tenant_fetcher.fetch_tenants()
         if not tenant_ids:
             logger.warning("No tenants found. Exiting.")
-            return
+            return 
 
         logger.info(f"Fetched tenant IDs: {tenant_ids}")       
 
@@ -66,8 +78,9 @@ def main():
         logger.info(f"Consolidated devices from all tenants and applications: {all_devices}")
 
     except Exception as e:
-        logger.error(f"Error in main execution: {str(e)}")
+        logger.error(f"Error in main execution: {str(e)}", exc_info=True)
 
 
 if __name__ == "__main__":
+    validate_config()
     main()
