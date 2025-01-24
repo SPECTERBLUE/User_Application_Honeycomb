@@ -24,7 +24,7 @@ class ApplicationFetcher:
         self.limit = config.LIMIT
         self.max_applications = config.MAX_APPLICATIONS
 
-    def fetch_applications(self):
+    def fetch_applications(self, tenant_id):
         """
         Fetches all applications from ChirpStack using the gRPC API with pagination.
 
@@ -39,7 +39,7 @@ class ApplicationFetcher:
                 request = api.ListApplicationsRequest(
                     limit=config.LIMIT,
                     offset=config.OFFSET,
-                    tenant_id=config.TENANT_ID
+                    tenant_id=tenant_id
                 )
                 logger.info(f"Fetching applications with offset {self.offset} and limit {self.limit}")
 

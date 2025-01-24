@@ -1,0 +1,5 @@
+chirpstack-api == 4.11.0
+google-api-core == 2.24.0
+google-auth == 2.37.0
+googleapis-common-protos == 1.66.0
+grpcio == 1.69.0
