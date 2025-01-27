@@ -2,6 +2,7 @@ import config
 from application_fetcher import ApplicationFetcher
 from device_fetcher import DeviceFetcher
 from tenant_fetcher import TenantFetcher
+from codec_fetcher import CodecFetcher
 from chirpstack_api import api
 import grpc
 import logging
@@ -32,6 +33,7 @@ def main():
         tenant_service_stub = api.TenantServiceStub(channel)
         application_service_stub = api.ApplicationServiceStub(channel)
         device_service_stub = api.DeviceServiceStub(channel)
+        device_profile_service_stub = api.DeviceProfileServiceStub(channel) 
 
         logger.info("gRPC connection established.")
         
@@ -39,6 +41,7 @@ def main():
         tenant_fetcher = TenantFetcher(tenant_service_stub)
         application_fetcher = ApplicationFetcher(application_service_stub)
         device_fetcher = DeviceFetcher(device_service_stub, config.AUTH_METADATA)
+        codec_fetcher = CodecFetcher(device_profile_service_stub)
         
         # Fetch tenants
         tenant_ids = tenant_fetcher.fetch_tenants()
@@ -66,6 +69,14 @@ def main():
             for app_id in application_ids:
                 logger.info(f"Fetching devices for application ID: {app_id}")
                 devices = device_fetcher.get_devices_as_dict(app_id)  # Pass app_id here
+                
+                # Fetch codec information for each device
+                for device_name, device_data in devices.items():
+                    device_profile_id = device_data.get("device_profile_id")
+                    if device_profile_id:
+                        codec_info = codec_fetcher.fetch_codec(device_profile_id)
+                        device_data.update(codec_info)
+                        logger.info(f"Updated codec information for device: {device_name}")
 
                 # Check for errors or empty results
                 if "error" not in devices:
