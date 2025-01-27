@@ -1,0 +1,42 @@
+{
+  "DevEUI": "1122334455667788",
+  "Timestamp": 1674816242,
+  "SensorType": "TEMP",
+  "Value": 25.42
+}
+
+
+{
+  "DevEUI": "1122334455667788",
+  "Timestamp": 1674816242,
+  "SensorType": "HUM",
+  "Value": 55.8
+}
+
+
+{
+  "DevEUI": "1122334455667788",
+  "Timestamp": 1674816242,
+  "SensorType": "IMU",
+  "pitch": 1.23,
+  "roll": -2.34,
+  "yaw": 179.99
+}
+
+
+{
+  "DevEUI": "1122334455667788",
+  "Timestamp": 1674816242,
+  "SensorType": "VIB",
+  "Value": 0.12
+}
+
+
+{
+  "DevEUI": "1122334455667788",
+  "Timestamp": 1674816242,
+  "SensorType": "DIST",
+  "Value": 3.75
+}
+
+
