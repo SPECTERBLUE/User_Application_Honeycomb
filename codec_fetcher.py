@@ -31,6 +31,10 @@ class CodecFetcher:
             
             logger.debug(f"Fetching device profile with ID: {device_profile_id}")
             
+            if not device_profile_id:
+                logger.error("Device profile ID is required but was not provided.")
+                return {"error": "Invalid device profile ID"}
+            
             response = self.device_profile_service_stub.Get(request, metadata=config.AUTH_METADATA)
             
              # Check if the response contains a device profile
@@ -47,5 +51,5 @@ class CodecFetcher:
                 logger.warning(f"No codec found for device profile ID {device_profile_id}")
                 return {"error": "No codec configured"}
         except Exception as e:
-            logger.error(f"Failed to fetch codec for device profile ID {device_profile_id}: {str(e)}")
+            logger.exception(f"Failed to fetch codec for device profile ID {device_profile_id}: {str(e)}")
             return {"error": str(e)}
