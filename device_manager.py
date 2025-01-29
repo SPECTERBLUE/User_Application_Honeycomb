@@ -1,7 +1,5 @@
 import logging
 import config
-import schedule
-import time
 import grpc
 
 from application_fetcher import ApplicationFetcher
@@ -106,12 +104,4 @@ class DeviceManager:
 # Create a single instance of DeviceManager
 device_manager = DeviceManager()
 
-# Function to periodically update devices
-def scheduled_update():
-    try:
-        device_manager.fetch_all_devices()
-    except Exception as e:
-        logger.error(f"Scheduled update failed: {e}", exc_info=True)
 
-# Schedule the update every 10 minutes
-schedule.every(10).minutes.do(scheduled_update)
