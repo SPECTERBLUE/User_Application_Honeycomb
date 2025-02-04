@@ -4,7 +4,7 @@ from application_fetcher import ApplicationFetcher
 from device_fetcher import DeviceFetcher
 from tenant_fetcher import TenantFetcher
 from codec_fetcher import CodecFetcher
-from event_stream_fetcher import EventStreamFetcher
+from old_code.event_stream_fetcher import EventStreamFetcher
 from chirpstack_api import api
 import grpc
 import logging
