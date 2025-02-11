@@ -1,4 +1,8 @@
 import logging
+import base64
+from chirpstack_api import api 
+import time
+from downlink import ua_key_manager, device_public_keys, device_crypto
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
 from Crypto.Cipher import AES
@@ -177,3 +181,83 @@ class SensorCrypto:
         except Exception as e:
             logging.error(f"Error decrypting data: {e}", exc_info=True)
             return None
+
+class KeyRotationManager:
+    """Manages the process of UA key rotation and downlink messaging."""
+    
+    def __init__(self, channel, auth_token):
+        """
+        Initialize Key Rotation Manager.
+
+        :param channel: gRPC channel for ChirpStack.
+        :param auth_token: Authentication metadata for API calls.
+        """
+        self.channel = channel
+        self.auth_token = auth_token
+
+    def queue_downlink(self, dev_eui, payload, f_port):
+        """
+        Sends a downlink message to a device or all devices.
+
+        :param dev_eui: Device EUI (or "ALL" for broadcasting).
+        :param payload: Payload to be sent in the downlink.
+        :param f_port: FPort number for the message.
+        """
+        logging.info(f"Queuing downlink for device {dev_eui} on FPort {f_port}")
+        
+        try:
+            # Convert payload to base64 encoding
+            data_base64 = base64.b64encode(payload.encode('utf-8')).decode("utf-8")
+            data_bytes = base64.b64decode(data_base64)
+
+            # Create downlink request
+            downlink_request = api.EnqueueDeviceQueueItemRequest(
+                queue_item=api.DeviceQueueItem(
+                    dev_eui=dev_eui,
+                    confirmed=True,
+                    f_port=f_port,
+                    data=data_bytes,
+                    f_cnt_down=12345  # Example downlink frame counter
+                )
+            )
+
+            # Send the downlink request
+            device_queue_service = api.DeviceServiceStub(channel=self.channel)
+            response = device_queue_service.Enqueue(downlink_request, metadata=self.auth_token)
+
+            logging.info(f"Downlink Response: {response}")
+
+        except Exception as e:
+            logging.error(f"Error queuing downlink for {dev_eui}: {e}", exc_info=True)
+
+    def rotate_keys(self):
+        """Performs UA key rotation and notifies devices via downlink."""
+        global last_rotation_time  # Import global state
+        
+        logging.info("Initiating UA Key Rotation...")
+
+        try:
+            # Generate new key pair
+            ua_key_manager.generate_key()
+
+            logging.info("New UA keys generated successfully.")
+            logging.debug(f"UA Private Key: {ua_key_manager.get_private_key()}")
+            logging.debug(f"UA Public Key : {ua_key_manager.get_public_key()}")
+
+            # Broadcast the new UA public key
+            downlink_payload = "UA_PUBKEY:" + ua_key_manager.get_public_key()
+            logging.info("Sending new UA public key to all devices on FPort 76.")
+            self.queue_downlink("ALL", downlink_payload, f_port=76)
+
+            # Send an acknowledgment
+            ack_payload = "success!!!"
+            logging.info("Sending acknowledgment on FPort 10.")
+            self.queue_downlink("ALL", ack_payload, f_port=10)
+
+            # Update last rotation timestamp
+            last_rotation_time = time.time()
+
+            logging.info("UA Key Rotation Complete.")
+
+        except Exception as e:
+            logging.error(f"Error during key rotation: {e}", exc_info=True)
