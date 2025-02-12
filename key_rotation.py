@@ -2,7 +2,6 @@ import logging
 import base64
 from chirpstack_api import api 
 import time
-from downlink import ua_key_manager, device_public_keys, device_crypto
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
 from Crypto.Cipher import AES
@@ -232,6 +231,7 @@ class KeyRotationManager:
 
     def rotate_keys(self):
         """Performs UA key rotation and notifies devices via downlink."""
+        from downlink import ua_key_manager, device_public_keys, device_crypto
         global last_rotation_time  # Import global state
         
         logging.info("Initiating UA Key Rotation...")
