@@ -58,6 +58,8 @@ def get_device_codec(dev_eui):
 
 def on_message(client, userdata, msg):
     """Callback when a message is received."""
+    global last_rotation_time, key_manager
+    
     try:
         logger.debug(f"Message received on topic {msg.topic}")
 
