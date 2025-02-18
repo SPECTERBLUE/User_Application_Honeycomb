@@ -2,6 +2,7 @@ import logging
 import base64
 from chirpstack_api import api 
 import time
+from device_manager import device_manager
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
 from Crypto.Cipher import AES
@@ -205,9 +206,15 @@ class KeyRotationManager:
         logging.info(f"Queuing downlink for device {dev_eui} on FPort {f_port}")
         
         try:
-            # Convert payload to base64 encoding
-            data_base64 = base64.b64encode(payload.encode('utf-8')).decode("utf-8")
-            data_bytes = base64.b64decode(data_base64)
+            # Convert payload to a hex-encoded byte sequence
+            data_hex = payload.encode("utf-8").hex()
+            # Ensure even-length by padding if needed
+            if len(data_hex) % 2 != 0:
+                data_hex = "0" + data_hex  # Prepend '0' to make length even
+
+            data_bytes = bytes.fromhex(data_hex)
+            logging.info(f"Sending Downlink Data (Hex): {data_hex}")
+            logging.info(f"Sending Downlink Data (Bytes): {data_bytes}")
 
             # Create downlink request
             downlink_request = api.EnqueueDeviceQueueItemRequest(
@@ -247,12 +254,29 @@ class KeyRotationManager:
             # Broadcast the new UA public key
             downlink_payload = "UA_PUBKEY:" + ua_key_manager.get_public_key()
             logging.info("Sending new UA public key to all devices on FPort 76.")
-            self.queue_downlink("ALL", downlink_payload, f_port=76)
+            
+            for device_name, device_data in device_manager.all_devices.items():
+                dev_eui = device_data.get("euid")
+                
+                if dev_eui and isinstance(dev_eui, str):
+                    self.queue_downlink(dev_eui, downlink_payload, f_port=76)
+                else:
+                    logging.warning(f"No devEui found for device {device_name}.")
+            #self.queue_downlink("ALL", downlink_payload, f_port=76)
 
             # Send an acknowledgment
-            ack_payload = "success!!!"
+            ACK_MESSAGE = "Key rotation successful."
+            ack_payload = ACK_MESSAGE
             logging.info("Sending acknowledgment on FPort 10.")
-            self.queue_downlink("ALL", ack_payload, f_port=10)
+            
+            for device_name, device_data in device_manager.all_devices.items():
+                dev_eui = device_data.get("euid")
+                
+                if dev_eui and isinstance(dev_eui, str):
+                    self.queue_downlink(dev_eui, ack_payload, f_port=10)
+                else:
+                    logging.warning(f"No devEui found for device {device_name}.")
+            #self.queue_downlink("ALL", ack_payload, f_port=10)
 
             # Update last rotation timestamp
             last_rotation_time = time.time()
