@@ -1,5 +1,4 @@
 import logging
-import base64
 from chirpstack_api import api 
 import time
 from device_manager import device_manager

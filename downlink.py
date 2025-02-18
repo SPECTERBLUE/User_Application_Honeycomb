@@ -158,12 +158,16 @@ def process_downlink_packet(packet: str):
                 new_ed_pub = data_ascii[7:]
                 logging.info(f"ED public key update received for device {dev_eui}: {new_ed_pub}")
 
-        if new_ed_pub & len(new_ed_pub) == 130:
+        if new_ed_pub and len(new_ed_pub) == 130:
             device_public_keys[dev_eui] = new_ed_pub
             try:
                 sk = SharedKey(ua_key_manager.get_private_key(), new_ed_pub)
+                shared_secret = sk.get_shared_secret()
+                logging.info(f"Generated shared key for device {dev_eui}: {sk}")
+                logging.info(f"Derived shared secret for device {dev_eui}: {shared_secret.hex()}")  # Convert bytes to hex for logging
+                
                 device_crypto[dev_eui] = SensorCrypto(sk.get_shared_secret())
-                logging.info(f"Updated shared secret for device {dev_eui}")
+                logging.info(f"Initialized SensorCrypto for device {dev_eui}: {device_crypto[dev_eui]}")
             except Exception as e:
                 logging.error(f"Error updating shared secret for device {dev_eui}: {e}", exc_info=True)
         else:
