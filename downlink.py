@@ -84,6 +84,13 @@ class DownlinkReassembler:
             return segment  # Return non-segmented messages as-is
 
         return ""  # Return empty if reassembly is incomplete
+    
+def is_valid_hex(s):
+    try:
+        bytes.fromhex(s)  # Try converting it to bytes
+        return True
+    except ValueError:
+        return False
 
 def process_downlink_packet(packet: str):
     """
@@ -125,18 +132,33 @@ def process_downlink_packet(packet: str):
     elif port == 26:
         logging.info(f"Received ED public key update on FPort 26 for device {dev_eui}: {data}")
         
+        # Validate if data is a valid hex string
+        if not is_valid_hex(data):
+            logging.error(f"Invalid hex data received for device {dev_eui}: {data}")
+            return  # Exit if invalid hex data
+        
+        try:
+            # Convert hex to ASCII
+            data_ascii = bytes.fromhex(data).decode("utf-8")
+            logging.info(f"Converted hex data to ASCII for device {dev_eui}: {data_ascii}")
+        except ValueError as e:
+            logging.error(f"Failed to convert hex to ASCII for device {dev_eui}: {e}", exc_info=True)
+            return  # Exit if conversion fail
+        
         reassembler = DownlinkReassembler()
-        if data.startswith("SEG"):
-            full_payload = reassembler.reassemble_segment(data)
+        new_ed_pub = None
+        
+        if data_ascii.startswith("SEG"):
+            full_payload = reassembler.reassemble_segment(data_ascii)
             if full_payload and full_payload.startswith("PUBKEY:"):
                 new_ed_pub = full_payload[7:]
                 logging.info(f"Reassembled ED public key for device {dev_eui}: {new_ed_pub}")
         else:
-            if data.startswith("PUBKEY:"):
-                new_ed_pub = data[7:]
+            if data_ascii.startswith("PUBKEY:"):
+                new_ed_pub = data_ascii[7:]
                 logging.info(f"ED public key update received for device {dev_eui}: {new_ed_pub}")
 
-        if len(new_ed_pub) == 130:
+        if new_ed_pub & len(new_ed_pub) == 130:
             device_public_keys[dev_eui] = new_ed_pub
             try:
                 sk = SharedKey(ua_key_manager.get_private_key(), new_ed_pub)
