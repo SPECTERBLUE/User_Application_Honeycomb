@@ -164,7 +164,7 @@ def process_downlink_packet(packet: str):
                 sk = SharedKey(ua_key_manager.get_private_key(), new_ed_pub)
                 shared_secret = sk.get_shared_secret()
                 logging.info(f"Generated shared key for device {dev_eui}: {sk}")
-                logging.info(f"Derived shared secret for device {dev_eui}: {shared_secret.hex()}")  # Convert bytes to hex for logging
+                logging.info(f"Derived shared secret for device {dev_eui}: {shared_secret}")  # Convert bytes to hex for logging
                 
                 device_crypto[dev_eui] = SensorCrypto(sk.get_shared_secret())
                 logging.info(f"Initialized SensorCrypto for device {dev_eui}: {device_crypto[dev_eui]}")
