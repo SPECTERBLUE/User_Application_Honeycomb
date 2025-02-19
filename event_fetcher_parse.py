@@ -93,7 +93,7 @@ def on_message(client, userdata, msg):
         codec = get_device_codec(dev_eui)
 
         if codec:
-            logger.info(f"Device {dev_eui} found. Using codec: {codec}")
+            logger.debug(f"Device {dev_eui} found. Using codec: {codec}")
             # decoded_data = codec.decode(data_hex)  # Implement decoding logic
             # logger.info(f"Decoded Data: {decoded_data}")
         else:
