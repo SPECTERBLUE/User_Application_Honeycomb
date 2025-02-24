@@ -31,7 +31,7 @@ class HttpSender:
             logging.info(f"Sending payload to {endpoint} with headers {headers}")
             response = requests.post(endpoint, json=payload, headers=headers, timeout=10)
             
-            if response.status_code == 200:
+            if response.status_code == 202:
                 logging.info(f"Successfully sent payload to {endpoint}: {response.text}")
             else:
                 logging.warning(f"Failed to send payload to {endpoint}: {response.status_code} - {response.text}")
