@@ -1,6 +1,6 @@
 # ChirpStack gRPC Configuration
-CHIRPSTACK_HOST = "localhost:8088"  # Ensure this is the correct ChirpStack gRPC server address
-API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjaGlycHN0YWNrIiwiaXNzIjoiY2hpcnBzdGFjayIsInN1YiI6IjM5NWE4ZWFjLTc5N2YtNDIzYy04ODM2LTgwMGU0MjI1NjNlZiIsInR5cCI6ImtleSJ9.19X5iDaI6PgQKuBRq12ytyF-iqezGlSovirKAz78x-o"  # Replace with your ChirpStack API token
+CHIRPSTACK_HOST = "192.168.0.71:8088"  # Ensure this is the correct ChirpStack gRPC server address
+API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjaGlycHN0YWNrIiwiaXNzIjoiY2hpcnBzdGFjayIsInN1YiI6IjcxZjZiYjBjLTc0OGMtNDI5MC1hODkyLTJmNDk3MjRhNTYxYSIsInR5cCI6ImtleSJ9.Ol6qv3NZ6CEI3x3-6Kqhs7q-ePVRTWs-CnnYabmhncc"  # Replace with your ChirpStack API token
 
 # Not needed
 APPLICATION_ID = None  # Remove hardcoded Application ID
@@ -13,6 +13,9 @@ MAX_APPLICATIONS = 1000
 MAX_TENANTS = 100
 LIMIT = 100
 OFFSET = 0
+
+# mqtt
+mqtt = "192.168.0.71"
 
 # Add authorization metadata
 AUTH_METADATA = [("authorization", f"Bearer {API_TOKEN}")]

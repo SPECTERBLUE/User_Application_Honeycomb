@@ -6,13 +6,14 @@ import time
 from device_manager import device_manager
 from downlink import process_downlink_packet 
 from key_rotation import KeyRotationManager
+import config
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # MQTT broker details
-broker = "localhost"  # Replace with your ChirpStack MQTT broker address
+broker = config.mqtt # Replace with your ChirpStack MQTT broker address
 port = 1883           # Default MQTT port (use 8883 for TLS)
 topic = "application/+/device/+/event/up"  # Topic for all events
 
@@ -105,7 +106,7 @@ def on_message(client, userdata, msg):
         
         # Check if 2 months have passed and trigger key rotation
         current_time = time.time()
-        if current_time - last_rotation_time >= 5184000:  # 2 months in seconds
+        if current_time - last_rotation_time >= 120:  # 2 months in seconds
             logger.info("🔄 2 months passed. Initiating key rotation...")
             if key_manager:
                 key_manager.rotate_keys()

@@ -7,6 +7,9 @@ from cryptography.hazmat.primitives import serialization
 from Crypto.Cipher import AES
 from binascii import hexlify
 from typing import Tuple
+from Crypto.Util.Padding import unpad
+from dataclasses import dataclass
+import struct
 
 # Configure logging
 logging.basicConfig(
@@ -124,7 +127,7 @@ class SensorCrypto:
         """
         try:
             logging.debug("Initializing SensorCrypto with shared secret.")
-            self.shared_secret = bytes.fromhex(shared_secret_hex)[:16]  # Use only the first 16 bytes
+            self.shared_secret = bytes.fromhex(shared_secret_hex) # Use only the first 16 bytes
             self.iv = bytes([0] * 16)  # Initialization Vector (IV) set to zero
 
             logging.info("SensorCrypto successfully initialized.")
@@ -171,15 +174,53 @@ class SensorCrypto:
             encrypted_bytes = bytes.fromhex(encrypted_hex)
 
             cipher = AES.new(self.shared_secret, AES.MODE_CBC, iv=self.iv)
-            decrypted_bytes = cipher.decrypt(encrypted_bytes)
+            logging.info(f"shared_key: {self.shared_secret}")
+            logging.info(f"Encrypted Data (Bytes): {encrypted_bytes.hex()}")
+            decrypted_pad = cipher.decrypt(encrypted_bytes)
+            logging.info(f"Decrypted Data (padded): {decrypted_pad.hex()}")
+            decrypted_final= unpad(decrypted_pad, AES.block_size)
+            logging.info(f"Decrypted Data (unpadded): {decrypted_final}")
 
             logging.info("Data decrypted successfully.")
 
-            return decrypted_bytes.rstrip(b'\0')  # Remove padding before returning
+            #return decrypted_final.rstrip(b'\0')  # Remove padding before returning
+            return SensorData.from_bytes(decrypted_final)
 
         except Exception as e:
             logging.error(f"Error decrypting data: {e}", exc_info=True)
             return None
+
+# temporary  
+###############################################################################
+# Sensor Data Class (packed for consistency)
+###############################################################################
+@dataclass
+class SensorData:
+    distance: float
+    ax: float
+    ay: float
+    az: float
+    gx: float
+    gy: float
+    gz: float
+    reserved: float
+
+    def to_bytes(self) -> bytes:
+        return struct.pack('<ffffffff', self.distance, self.ax, self.ay, self.az,
+                           self.gx, self.gy, self.gz, self.reserved)
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'SensorData':
+        values = struct.unpack('<ffffffff', data[:32])
+        return cls(*values)
+
+    def __str__(self):
+        return (f"Sensor Data:\n"
+                f"  distance: {self.distance:.2f}\n"
+                f"  acceleration: [{self.ax:.2f}, {self.ay:.2f}, {self.az:.2f}]\n"
+                f"  gyroscope: [{self.gx:.2f}, {self.gy:.2f}, {self.gz:.2f}]\n"
+                f"  reserved: {self.reserved:.2f}")
+
 
 class KeyRotationManager:
     """Manages the process of UA key rotation and downlink messaging."""
