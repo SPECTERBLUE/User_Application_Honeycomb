@@ -1,6 +1,8 @@
 import logging
 from key_rotation import KeyManager, SharedKey, SensorCrypto
 from binascii import hexlify
+from device_manager import device_manager
+import js2py
 
 # Configure logging
 logging.basicConfig(
@@ -16,6 +18,18 @@ last_rotation_time = 0  # Timestamp for last key rotation
 device_public_keys = {}  # Example: {"2cf7f12052608e69": <ED public key>}
 device_crypto = {}  # Stores SensorCrypto instances keyed by DevEUI
 
+def get_device_codec(dev_eui):
+    """Find the codec for a device based on dev_eui."""
+    try:
+        for device_name, device_info in device_manager.all_devices.items():
+            if device_info.get("euid") == dev_eui:
+                logging.debug(f"Device {dev_eui} matched with {device_name}, using codec: {device_info.get('codec')}")
+                return device_info.get("codec")
+        logging.warning(f"No codec found for device {dev_eui}")
+        return None
+    except Exception as e:
+        logging.error(f"Error fetching codec for device {dev_eui}: {e}")
+        return None
 class DownlinkReassembler:
     """Handles reassembly of segmented downlink messages."""
     
@@ -185,3 +199,31 @@ def process_downlink_packet(packet: str):
             logging.info(f"Decrypted Sensor Data for device {dev_eui}: {decrypted_data}")
         except Exception as e:
             logging.error(f"Decryption failed for device {dev_eui}: {e}", exc_info=True)
+            
+        # Find codec for the device
+        codec = get_device_codec(dev_eui)
+
+        if codec:
+            logging.debug(f"Device {dev_eui} found. Using codec: {codec}")
+            # decoded_data = codec.decode(data_hex)  # Implement decoding logic
+            # logger.info(f"Decoded Data: {decoded_data}")
+        else:
+            logging.warning(f"No codec found for device {dev_eui}.")
+
+         # Convert decrypted data to a byte array (ASCII conversion)
+        bytes_array = [ord(c) for c in decrypted_data] if isinstance(decrypted_data, str) else list(decrypted_data)
+
+         # Execute the JavaScript decoder
+        try:
+            # Load the JavaScript codec dynamically
+            js_decoder = js2py.eval_js(codec)
+
+            # Call the Decode function with the provided fPort
+            decoded_data = js_decoder.Decode(bytes_array)
+
+            logging.info(f"Decoded Data: {decoded_data}")
+            return decoded_data
+        
+        except Exception as e:
+            logging.error(f"Decoding failed for device {dev_eui}: {e}", exc_info=True)
+            return None

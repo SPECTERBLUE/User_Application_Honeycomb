@@ -183,8 +183,8 @@ class SensorCrypto:
 
             logging.info("Data decrypted successfully.")
 
-            #return decrypted_final.rstrip(b'\0')  # Remove padding before returning
-            return SensorData.from_bytes(decrypted_final)
+            return decrypted_final.rstrip(b'\0')  # Remove padding before returning
+            #return SensorData.from_bytes(decrypted_final)
 
         except Exception as e:
             logging.error(f"Error decrypting data: {e}", exc_info=True)
@@ -194,6 +194,7 @@ class SensorCrypto:
 ###############################################################################
 # Sensor Data Class (packed for consistency)
 ###############################################################################
+"""
 @dataclass
 class SensorData:
     distance: float
@@ -220,6 +221,7 @@ class SensorData:
                 f"  acceleration: [{self.ax:.2f}, {self.ay:.2f}, {self.az:.2f}]\n"
                 f"  gyroscope: [{self.gx:.2f}, {self.gy:.2f}, {self.gz:.2f}]\n"
                 f"  reserved: {self.reserved:.2f}")
+"""
 
 
 class KeyRotationManager:
