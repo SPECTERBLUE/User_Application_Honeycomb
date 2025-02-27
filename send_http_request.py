@@ -59,7 +59,7 @@ class HttpSender:
                 
                 # Add Authorization headers if it's an HTTP endpoint
                 if "channels" in endpoint:
-                    headers["Content-Type"] = "application/senml+json"
+                    headers["Content-Type"] = "application/json"
                     headers.update(headers_from_api)  # Merge headers from API
                 
                 # Submit the request to the executor

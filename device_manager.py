@@ -66,6 +66,8 @@ class DeviceManager:
                                         codec_info = self.codec_fetcher.fetch_codec(device_profile_id)
                                         device_data.update(codec_info)
                                         logger.info(f"Updated codec information for device: {device_name}")
+                                    # Add application_id explicitly
+                                    device_data["application_id"] = app_id
                                 except Exception as e:
                                     logger.error(f"Error fetching codec for device {device_name}: {e}", exc_info=True)
                             

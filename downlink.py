@@ -3,12 +3,20 @@ from key_rotation import KeyManager, SharedKey, SensorCrypto
 from binascii import hexlify
 from device_manager import device_manager
 import js2py
+import config
+from send_http_request import HttpSender
+import grpc
+import json
 
 # Configure logging
 logging.basicConfig(
     level=logging.DEBUG,  # Set to DEBUG for detailed logs
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
+# gRPC Channel Setup
+channel = grpc.insecure_channel(config.CHIRPSTACK_HOST)
+sender = HttpSender(channel, config.AUTH_METADATA)
 
 # Initialize UA Key Manager (generates private/public key pair)
 ua_key_manager = KeyManager()
@@ -29,6 +37,20 @@ def get_device_codec(dev_eui):
         return None
     except Exception as e:
         logging.error(f"Error fetching codec for device {dev_eui}: {e}")
+        return None
+    
+def get_application_id(dev_eui):
+    """Find the application ID for a device based on dev_eui."""
+    try:
+        for device_name, device_info in device_manager.all_devices.items():
+            if device_info.get("euid") == dev_eui:
+                app_id = device_info.get("application_id")
+                logging.debug(f"Device {dev_eui} matched with {device_name}, using application_id: {app_id}")
+                return app_id
+        logging.warning(f"No application ID found for device {dev_eui}")
+        return None
+    except Exception as e:
+        logging.error(f"Error fetching application ID for device {dev_eui}: {e}")
         return None
 class DownlinkReassembler:
     """Handles reassembly of segmented downlink messages."""
@@ -211,19 +233,81 @@ def process_downlink_packet(packet: str):
             logging.warning(f"No codec found for device {dev_eui}.")
 
          # Convert decrypted data to a byte array (ASCII conversion)
-        bytes_array = [ord(c) for c in decrypted_data] if isinstance(decrypted_data, str) else list(decrypted_data)
+        #bytes_array = [ord(c) for c in decrypted_data] if isinstance(decrypted_data, str) else list(decrypted_data)
 
          # Execute the JavaScript decoder
         try:
-            # Load the JavaScript codec dynamically
-            js_decoder = js2py.eval_js(codec)
+            # Get application ID dynamically
+            application_id = get_application_id(dev_eui)
+            if not application_id:
+                logging.error(f"Application ID not found for device {dev_eui}, skipping processing.")
+                return None
+        
+            # Initialize JavaScript environment
+            js_decoder = js2py.EvalJs()
 
-            # Call the Decode function with the provided fPort
-            decoded_data = js_decoder.Decode(bytes_array)
+            # Execute the JavaScript decoder
+            js_decoder.execute(codec)
+            logging.info(f"js_decoder: {js_decoder}")
 
+            # Decode bytes to a string before passing to JavaScript
+            decoded_payload = decrypted_data.decode('utf-8')
+
+            # Convert to a list of character codes (needed for JavaScript)
+            char_codes = [ord(c) for c in decoded_payload]
+
+            # Call the Decode function
+            decoded_data = js_decoder.Decode(char_codes)
             logging.info(f"Decoded Data: {decoded_data}")
+            
+            # Ensure decoded_data is valid before sending
+            if decoded_data:
+                send_data(decoded_data, application_id)  # Send decoded data with dynamic application ID
+            else:
+                logging.error("Decoded data is empty")
             return decoded_data
         
         except Exception as e:
             logging.error(f"Decoding failed for device {dev_eui}: {e}", exc_info=True)
             return None
+'''
+def send_data(decoded_data, application_id):
+    """
+    Sends the decoded data directly as the payload to ChirpStack using the dynamic Application ID.
+    """
+    try:
+        # Convert JsObjectWrapper to a Python dict/list
+        if isinstance(decoded_data, js2py.base.JsObjectWrapper):
+            decoded_data = js2py.translate_js(decoded_data)  # Convert JS object to Python object
+         # Ensure decoded_data is properly formatted as JSON
+        json_payload = json.dumps(decoded_data)  # Convert list/dict to valid JSON string
+        
+        sender.send_payload(application_id, json_payload)  # Sending decoded_data as is
+        logging.info(f"Payload sent successfully to application {application_id}: {decoded_data}")
+
+    except Exception as e:
+        logging.error(f"Failed to send payload to application {application_id}: {e}", exc_info=True) 
+        '''
+
+
+
+def send_data(decoded_data, application_id):
+    """
+    Sends the decoded data directly as the payload to ChirpStack using the dynamic Application ID.
+    """
+    try:
+        # Convert JsObjectWrapper to a Python dict/list
+        if isinstance(decoded_data, js2py.base.JsObjectWrapper):
+            try:
+                decoded_data = decoded_data.to_dict()  # Convert to Python dict
+            except AttributeError:
+                decoded_data = decoded_data.to_list()  # Convert to Python list if applicable
+
+        # Ensure decoded_data is properly formatted as JSON
+        json_payload = json.dumps(decoded_data, indent=2)  # Pretty-print for debugging
+        
+        sender.send_payload(application_id, json_payload)
+        logging.info(f"Payload sent successfully to application {application_id}: {json_payload}")
+
+    except Exception as e:
+        logging.error(f"Failed to send payload to application {application_id}: {e}", exc_info=True)
