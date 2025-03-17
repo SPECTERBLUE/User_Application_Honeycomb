@@ -256,8 +256,8 @@ def process_downlink_packet(packet: str):
             # Convert to a list of character codes (needed for JavaScript)
             char_codes = [ord(c) for c in decoded_payload]
 
-            # Call the Decode function
-            decoded_data = js_decoder.Decode(char_codes)
+            # Call the Decode function and send the dev_eui
+            decoded_data = js_decoder.Decode(char_codes, dev_eui)
             logging.info(f"Decoded Data: {decoded_data}")
             
             # Ensure decoded_data is valid before sending
@@ -306,8 +306,9 @@ def send_data(decoded_data, application_id):
         # Ensure decoded_data is properly formatted as JSON
         json_payload = json.dumps(decoded_data, indent=2)  # Pretty-print for debugging
         
-        sender.send_payload(application_id, json_payload)
-        logging.info(f"Payload sent successfully to application {application_id}: {json_payload}")
+        # removing the extra added field of data in codec and sending it forward
+        sender.send_payload(application_id, decoded_data['data'])
+        logging.info(f"Payload sent successfully to application {application_id}: {decoded_data['data']}")
 
     except Exception as e:
         logging.error(f"Failed to send payload to application {application_id}: {e}", exc_info=True)

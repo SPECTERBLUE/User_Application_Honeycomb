@@ -41,18 +41,25 @@
   };
   
   function IMUDataDecoder() {}
-  IMUDataDecoder.prototype.decode = function (jsonObj) {
-    if (typeof jsonObj.pitch !== "number" || typeof jsonObj.roll !== "number" || typeof jsonObj.yaw !== "number") {
-      throw new Error("IMU requires numeric pitch, roll, yaw fields");
-    }
-    validateRange(jsonObj.pitch, -180, 180, "Pitch");
-    validateRange(jsonObj.roll, -180, 180, "Roll");
-    validateRange(jsonObj.yaw, -180, 180, "Yaw");
-    return [
-      { bn: "urn:dev:" + jsonObj.DevEUI + ":", bt: 1792200255, n: "pitch", u: "deg", v: jsonObj.pitch },
-      { bn: "urn:dev:" + jsonObj.DevEUI + ":", bt: 1792200255, n: "roll", u: "deg", v: jsonObj.roll },
-      { bn: "urn:dev:" + jsonObj.DevEUI + ":", bt: 1792200255, n: "yaw", u: "deg", v: jsonObj.yaw }
-    ];
+  IMUDataDecoder.prototype.decode = function (jsonObj, dev_eui) {
+    // if (typeof jsonObj.pitch !== "number" || typeof jsonObj.roll !== "number" || typeof jsonObj.yaw !== "number") {
+    //   throw new Error("IMU requires numeric pitch, roll, yaw fields");
+    // }
+    // validateRange(jsonObj.pitch, -180, 180, "Pitch");
+    // validateRange(jsonObj.roll, -180, 180, "Roll");
+    // validateRange(jsonObj.yaw, -180, 180, "Yaw");
+    // return [
+    //   { bn: "urn:dev:" + jsonObj.DevEUI + ":", bt: 1792200255, n: "pitch", u: "deg", v: jsonObj.pitch },
+    //   { bn: "urn:dev:" + jsonObj.DevEUI + ":", bt: 1792200255, n: "roll", u: "deg", v: jsonObj.roll },
+    //   { bn: "urn:dev:" + jsonObj.DevEUI + ":", bt: 1792200255, n: "yaw", u: "deg", v: jsonObj.yaw }
+    // ];
+    retObj = { data: [
+      {bn: "urn:dev:" + dev_eui, n:"gx", u:"deg/sec", v:jsonObj.g[0]},
+      {bn: "urn:dev:" + dev_eui, n:"gy", u:"deg/sec", v:jsonObj.g[1]},
+      {bn: "urn:dev:" + dev_eui, n:"gz", u:"deg/sec", v:jsonObj.g[2]},
+    ]};
+    console.log(retObj);
+    return retObj;
   };
   
   function VibrationDataDecoder() {}
@@ -76,23 +83,24 @@
   /************************************************************
     4) COMBINED Decode FUNCTION
    ************************************************************/
-  function Decode(bytes) {
+  function Decode(bytes, dev_eui) {
     try {
       var jsonObj = parseJsonFromBytes(bytes);
-      if (!jsonObj.SensorType) {
-        throw new Error("Missing 'SensorType' in JSON");
+      console.log(jsonObj)
+      if (!jsonObj.fport) {
+        throw new Error("Missing 'fport' in JSON");
       }
       var decoders = {
         "TEMP": new TemperatureDataDecoder(),
         "HUM": new HumidityDataDecoder(),
-        "IMU": new IMUDataDecoder(),
+        3: new IMUDataDecoder(),
         "VIB": new VibrationDataDecoder(),
-        "DIST": new DistanceDataDecoder()
+        4: new DistanceDataDecoder()
       };
-      if (decoders[jsonObj.SensorType]) {
-        return decoders[jsonObj.SensorType].decode(jsonObj);
+      if (decoders[jsonObj.fport]) {
+        return decoders[jsonObj.fport].decode(jsonObj, dev_eui);
       }
-      throw new Error("Unknown SensorType: " + jsonObj.SensorType);
+      throw new Error("Unknown SensorType: " + jsonObj.fport);
     } catch (err) {
       return { error: err.message };
     }

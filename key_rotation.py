@@ -174,7 +174,7 @@ class SensorCrypto:
             encrypted_bytes = bytes.fromhex(encrypted_hex)
 
             cipher = AES.new(self.shared_secret, AES.MODE_CBC, iv=self.iv)
-            logging.info(f"shared_key: {self.shared_secret}")
+            logging.info(f"shared_key: {self.shared_secret.hex()}")
             logging.info(f"Encrypted Data (Bytes): {encrypted_bytes.hex()}")
             decrypted_pad = cipher.decrypt(encrypted_bytes)
             logging.info(f"Decrypted Data (padded): {decrypted_pad.hex()}")
