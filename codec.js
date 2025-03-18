@@ -54,9 +54,9 @@
     //   { bn: "urn:dev:" + jsonObj.DevEUI + ":", bt: 1792200255, n: "yaw", u: "deg", v: jsonObj.yaw }
     // ];
     retObj = { data: [
-      {bn: "urn:dev:" + dev_eui, n:"gx", u:"deg/sec", v:jsonObj.g[0]},
-      {bn: "urn:dev:" + dev_eui, n:"gy", u:"deg/sec", v:jsonObj.g[1]},
-      {bn: "urn:dev:" + dev_eui, n:"gz", u:"deg/sec", v:jsonObj.g[2]},
+      {bn: "imu_" + dev_eui, n:"_gx", u:"deg/sec", v:jsonObj.g[0]},
+      {bn: "imu_" + dev_eui, n:"_gy", u:"deg/sec", v:jsonObj.g[1]},
+      {bn: "imu_" + dev_eui, n:"_gz", u:"deg/sec", v:jsonObj.g[2]},
     ]};
     console.log(retObj);
     return retObj;
@@ -72,12 +72,14 @@
   };
   
   function DistanceDataDecoder() {}
-  DistanceDataDecoder.prototype.decode = function (jsonObj) {
-    if (typeof jsonObj.Value !== "number") {
-      throw new Error("Missing numeric 'Value' for Distance");
+  DistanceDataDecoder.prototype.decode = function (jsonObj, dev_eui) {
+    if (typeof jsonObj.distance !== "number") {
+      throw new Error("Missing numeric 'distance' for Distance");
     }
-    validateRange(jsonObj.Value, 0, 100, "Distance");
-    return [{ bn: "urn:dev:" + jsonObj.DevEUI + ":", bt: 1792200255, n: "distance", u: "m", v: jsonObj.Value }];
+    validateRange(jsonObj.distance, 0, 100, "Distance");
+    retObj = {data:[{ bn: "distance_" + dev_eui, n: "_distance", u: "cm", v: jsonObj.distance }]};
+    console.log(retObj);
+    return retObj;
   };
   
   /************************************************************
@@ -120,3 +122,8 @@
     };
   }
   
+  // function to suffise error of chripstack codec not finding "decodeUplink"
+  function decodeUplink(input) {
+    ret = Decode(input.bytes, "STATIC");
+    return {data: ret};
+  }

@@ -84,7 +84,7 @@ def on_message(client, userdata, msg):
         
         # Check if 2 months have passed and trigger key rotation
         current_time = time.time()
-        if current_time - last_rotation_time >= 120:  # 2 months in seconds
+        if current_time - last_rotation_time >= 30*60:  # 2 months in seconds
             logger.info("🔄 2 months passed. Initiating key rotation...")
             if key_manager:
                 key_manager.rotate_keys()
