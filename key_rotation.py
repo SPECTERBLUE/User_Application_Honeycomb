@@ -8,8 +8,8 @@ from Crypto.Cipher import AES
 from binascii import hexlify
 from typing import Tuple
 from Crypto.Util.Padding import unpad
-from dataclasses import dataclass
-import struct
+#from dataclasses import dataclass
+#import struct
 
 # Configure logging
 logging.basicConfig(
@@ -174,7 +174,7 @@ class SensorCrypto:
             encrypted_bytes = bytes.fromhex(encrypted_hex)
 
             cipher = AES.new(self.shared_secret, AES.MODE_CBC, iv=self.iv)
-            logging.info(f"shared_key: {self.shared_secret}")
+            logging.info(f"shared_key: {self.shared_secret.hex()}")
             logging.info(f"Encrypted Data (Bytes): {encrypted_bytes.hex()}")
             decrypted_pad = cipher.decrypt(encrypted_bytes)
             logging.info(f"Decrypted Data (padded): {decrypted_pad.hex()}")
@@ -183,8 +183,8 @@ class SensorCrypto:
 
             logging.info("Data decrypted successfully.")
 
-            #return decrypted_final.rstrip(b'\0')  # Remove padding before returning
-            return SensorData.from_bytes(decrypted_final)
+            return decrypted_final.rstrip(b'\0')  # Remove padding before returning
+            #return SensorData.from_bytes(decrypted_final)
 
         except Exception as e:
             logging.error(f"Error decrypting data: {e}", exc_info=True)
@@ -194,6 +194,7 @@ class SensorCrypto:
 ###############################################################################
 # Sensor Data Class (packed for consistency)
 ###############################################################################
+"""
 @dataclass
 class SensorData:
     distance: float
@@ -220,6 +221,7 @@ class SensorData:
                 f"  acceleration: [{self.ax:.2f}, {self.ay:.2f}, {self.az:.2f}]\n"
                 f"  gyroscope: [{self.gx:.2f}, {self.gy:.2f}, {self.gz:.2f}]\n"
                 f"  reserved: {self.reserved:.2f}")
+"""
 
 
 class KeyRotationManager:

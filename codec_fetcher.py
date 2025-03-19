@@ -45,7 +45,8 @@ class CodecFetcher:
             codec = response.device_profile.payload_codec_script if response.device_profile.payload_codec_script else None
 
             if codec:
-                logger.info(f"Fetched codec for device profile ID {device_profile_id}: {codec}")
+                # logger.info(f"Fetched codec for device profile ID {device_profile_id}: {codec}")
+                logger.info(f"Fetched codec for device profile ID {device_profile_id}")
                 return {"codec": codec}
             else:
                 logger.warning(f"No codec found for device profile ID {device_profile_id}")

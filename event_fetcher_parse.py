@@ -3,7 +3,6 @@ import base64
 import json
 import logging
 import time
-from device_manager import device_manager
 from downlink import process_downlink_packet 
 from key_rotation import KeyRotationManager
 import config
@@ -44,18 +43,7 @@ def on_connect(client, userdata, flags, rc):
     else:
         logger.error(f"Failed to connect to MQTT broker, return code {rc}")
 
-def get_device_codec(dev_eui):
-    """Find the codec for a device based on dev_eui."""
-    try:
-        for device_name, device_info in device_manager.all_devices.items():
-            if device_info.get("euid") == dev_eui:
-                logger.debug(f"Device {dev_eui} matched with {device_name}, using codec: {device_info.get('codec')}")
-                return device_info.get("codec")
-        logger.warning(f"No codec found for device {dev_eui}")
-        return None
-    except Exception as e:
-        logger.error(f"Error fetching codec for device {dev_eui}: {e}")
-        return None
+
 
 def on_message(client, userdata, msg):
     """Callback when a message is received."""
@@ -89,16 +77,6 @@ def on_message(client, userdata, msg):
         
         # Call `process_downlink_packet` from `downlink.py`
         process_downlink_packet(packet)
-        
-        # Find codec for the device
-        codec = get_device_codec(dev_eui)
-
-        if codec:
-            logger.debug(f"Device {dev_eui} found. Using codec: {codec}")
-            # decoded_data = codec.decode(data_hex)  # Implement decoding logic
-            # logger.info(f"Decoded Data: {decoded_data}")
-        else:
-            logger.warning(f"No codec found for device {dev_eui}. Raw data: {data_hex}")
 
         # Log extracted information
         logger.info(f"DR: {dr}, FCnt: {f_cnt}, FPort: {f_port}, Data (Hex): {data_hex}")
@@ -106,7 +84,7 @@ def on_message(client, userdata, msg):
         
         # Check if 2 months have passed and trigger key rotation
         current_time = time.time()
-        if current_time - last_rotation_time >= 120:  # 2 months in seconds
+        if current_time - last_rotation_time >= 30*60:  # 2 months in seconds
             logger.info("🔄 2 months passed. Initiating key rotation...")
             if key_manager:
                 key_manager.rotate_keys()
