@@ -8,8 +8,8 @@ from Crypto.Cipher import AES
 from binascii import hexlify
 from typing import Tuple
 from Crypto.Util.Padding import unpad
-from dataclasses import dataclass
-import struct
+#from dataclasses import dataclass
+#import struct
 
 # Configure logging
 logging.basicConfig(
