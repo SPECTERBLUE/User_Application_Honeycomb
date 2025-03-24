@@ -21,14 +21,20 @@ USER-APPLICATION-HONEYCOMB/
 🕠 .gitignore                 # Git ignore rules
 🕠 application_fetcher.py      # Fetches applications from ChirpStack
 🕠 codec_fetcher.py           # Retrieves codec information for devices
+🕠 codec_struct_dec.py        # Decodes structured codec data
+🕠 codec.js                   # JavaScript codec file
 🕠 config.py                  # Stores configuration variables
 🕠 device_fetcher.py          # Fetches devices from ChirpStack
 🕠 device_manager.py          # Manages device storage and updates
+🕠 downlink.py                # Handles downlink messaging
 🕠 event_fetcher_parse.py     # Listens to MQTT events and decodes data
+🕠 http_integration_fetcher.py# Handles HTTP integration with ChirpStack
+🕠 key_rotation.py            # Manages key rotation for encryption
 🕠 main.py                    # Starts the system (scheduler + MQTT listener)
 🕠 README.md                  # Project documentation
 🕠 requirements.txt           # Required dependencies
 🕠 scheduler.py               # Periodically updates device list
+🕠 send_http_request.py       # Handles sending HTTP requests
 🕠 tenant_fetcher.py          # Fetches tenants from ChirpStack
 ```
 
@@ -37,7 +43,7 @@ USER-APPLICATION-HONEYCOMB/
 ## **📦 Installation & Setup**
 ### **1️⃣ Prerequisites**
 Ensure you have:
-- Python **3.x**
+- Python **3.10.12**
 - ChirpStack MQTT broker running
 - `pip` installed
 
@@ -149,3 +155,6 @@ This project is licensed under the **MIT License**.
 ## **👨‍💻 Contributing**
 Pull requests are welcome! Open an issue for discussions.
 
+---
+
+Let me know if you need further modifications! 🚀
