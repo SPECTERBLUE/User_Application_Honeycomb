@@ -7,6 +7,12 @@ from downlink import process_downlink_packet
 from key_rotation import KeyRotationManager
 import config
 
+from device_manager import device_manager
+import grpc
+from config import AUTH_METADATA, CHIRPSTACK_HOST
+from chirpstack_api import api
+from binascii import unhexlify
+
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -97,13 +103,24 @@ def handle_join_event(payload):
     """Handle join event and trigger key rotation."""
     global last_rotation_time, key_manager
     try:
+        
+        # flush
+        for _, device_info in device_manager.all_devices.items():
+            dev_eui = device_info.get("euid")
+            channel = grpc.insecure_channel(CHIRPSTACK_HOST)
+            client = api.DeviceServiceStub(channel)
+            req = api.FlushDeviceQueueRequest(dev_eui=dev_eui)
+            resp = client.FlushQueue(req, metadata=AUTH_METADATA)
+            logger.info(f"Device Queue Flush Enqueued {dev_eui}")
+        #
+        
         dev_eui = payload["deviceInfo"].get("devEui")
         if not dev_eui:
             logger.warning("Missing DevEUI in join event")
             return
         
         logger.info(f"Device {dev_eui} joined.")
-        
+
         if key_manager:
             logger.info(f"🔑 Rotating keys for device {dev_eui}...")
             time.sleep(0.5 * 60)  # Simulate delay
