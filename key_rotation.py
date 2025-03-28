@@ -328,18 +328,17 @@ class KeyRotationManager:
         except Exception as e:
             logging.error(f"Error during key rotation: {e}", exc_info=True)
             
-    def send_reboot_command(self):
+    def send_reboot_command(self,dev_eui):
         """Send a reboot command to all devices."""
         logging.info("Sending reboot command to all devices.")
         
         reboot_payload = "REBOOT"
+        try:
+            self.queue_downlink(dev_eui, reboot_payload, f_port=52)
+            logging.info(f"Reboot command sent successfully to device {dev_eui}.")
+        except Exception as e:
+            logging.error(f"Failed to send reboot command to device {dev_eui}: {e}", exc_info=True)
 
-        for device_name, device_data in device_manager.all_devices.items():
-            dev_eui = device_data.get("euid")
-
-            if dev_eui and isinstance(dev_eui, str):
-                self.queue_downlink(dev_eui, reboot_payload, f_port=52)
-            else:
-                logging.warning(f"No devEui found for device {device_name}.")
+        
 
         
