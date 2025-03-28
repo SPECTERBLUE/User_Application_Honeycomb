@@ -1,7 +1,10 @@
 from fastapi import FastAPI, HTTPException, status
 import event_fetcher_parse as efp
+import json
+import os
 
 app = FastAPI()
+CONFIG_FILE = "config-api.json"
 
 @app.post("/downlink/reset-keyrotation", status_code=status.HTTP_200_OK)
 async def resetkeyrotation(data: dict):
@@ -37,3 +40,122 @@ async def resetkeyrotation(data: dict):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
             detail="Internal Server Error: " + str(e)
         )
+        
+def save_update_config(update_frequency, dev_euid):
+    """Save update frequency and dev_euid to a JSON file with exception handling."""
+    try:
+        data = {"update_frequency": update_frequency, "dev_euid": dev_euid}
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save configuration: {str(e)}"
+        )
+
+
+def get_update_info():
+    """Read the update frequency and dev_euid from the JSON file with exception handling."""
+    try:
+        if not os.path.exists(CONFIG_FILE):
+            raise FileNotFoundError("Configuration file not found.")
+        
+        with open(CONFIG_FILE, "r") as f:
+            return json.load(f)
+    
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Configuration file not found."
+        )
+    
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Configuration file is corrupted."
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to read configuration: {str(e)}"
+        )
+
+
+@app.post("/downlink/update-frequency", status_code=status.HTTP_200_OK)
+async def update_frequency(update_frequency: int, dev_euid: str):
+    """
+    Endpoint to send downlink data for updating frequency.
+    """
+    try:
+        # Validate update_frequency (must be greater than 1)[mins]
+        if update_frequency <= 1:
+            raise ValueError("Invalid update frequency value. It must be greater than 1.")
+
+        save_update_config(update_frequency, dev_euid)
+
+        return {
+            "status": "success",
+            "message": "Update frequency set successfully",
+            "data_cycle": update_frequency,
+            "dev_euid": dev_euid
+        }
+
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except TypeError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid data type. Frequency must be an integer."
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal Server Error: {str(e)}"
+        )
+
+
+@app.get("/downlink/get-config", status_code=status.HTTP_200_OK)
+async def get_config():
+    """Endpoint to retrieve stored update frequency and dev_euid."""
+    return get_update_info()
+
+@app.post("/downlink/device-reboot", status_code=status.HTTP_200_OK)
+async def device_reboot(dev_euid: str):
+    """
+    Endpoint to send downlink data for device reboot.
+    """
+    try:
+        # software reboot
+        if efp.key_manager:
+            efp.key_manager.send_reboot_command(dev_euid)
+            return {
+                "status": "success",
+                "message": "Device reboot command sent successfully",
+                "dev_euid": dev_euid
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="KeyRotationManager not initialized"
+            )
+
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except PermissionError as pe:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
+   
