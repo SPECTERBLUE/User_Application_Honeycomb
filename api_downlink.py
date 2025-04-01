@@ -2,6 +2,11 @@ from fastapi import FastAPI, HTTPException, status
 import event_fetcher_parse as efp
 import json
 import os
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.ERROR)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 CONFIG_FILE = "config-api.json"
@@ -88,10 +93,23 @@ async def update_frequency(update_frequency: int, dev_euid: str):
     Endpoint to send downlink data for updating frequency.
     """
     try:
-        # Validate update_frequency (must be greater than 1)[mins]
+        # Validate update_frequency (must be greater than 1 minute)
+        if not isinstance(update_frequency, int):
+            raise TypeError("Update frequency must be an integer.")
         if update_frequency <= 1:
             raise ValueError("Invalid update frequency value. It must be greater than 1.")
 
+        # Check if efp.key_manager exists and has the method
+        if hasattr(efp, "key_manager") and hasattr(efp.key_manager, "send_update_frequency"):
+            efp.key_manager.send_update_frequency(dev_euid, update_frequency)
+        else:
+            logger.error("Key manager is not available or method is missing.")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Key manager service is unavailable."
+            )
+
+        # Save configuration
         save_update_config(update_frequency, dev_euid)
 
         return {
@@ -102,19 +120,31 @@ async def update_frequency(update_frequency: int, dev_euid: str):
         }
 
     except ValueError as ve:
+        logger.error(f"Validation error: {ve}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(ve)
         )
-    except TypeError:
+
+    except TypeError as te:
+        logger.error(f"Type error: {te}")
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Invalid data type. Frequency must be an integer."
         )
-    except Exception as e:
+
+    except AttributeError as ae:
+        logger.error(f"Attribute error: {ae}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal Server Error: {str(e)}"
+            detail="Internal configuration error. Missing required attributes."
+        )
+
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred. Please try again later."
         )
 
 

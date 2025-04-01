@@ -304,8 +304,7 @@ class KeyRotationManager:
                     self.queue_downlink(dev_eui, downlink_payload, f_port=76)
                 else:
                     logging.warning(f"No devEui found for device {device_name}.")
-            #self.queue_downlink("ALL", downlink_payload, f_port=76)
-
+            
             # Send an acknowledgment
             ACK_MESSAGE = "Key rotation successful."
             ack_payload = ACK_MESSAGE
@@ -318,8 +317,7 @@ class KeyRotationManager:
                     self.queue_downlink(dev_eui, ack_payload, f_port=10)
                 else:
                     logging.warning(f"No devEui found for device {device_name}.")
-            #self.queue_downlink("ALL", ack_payload, f_port=10)
-
+            
             # Update last rotation timestamp
             last_rotation_time = time.time()
 
@@ -333,12 +331,23 @@ class KeyRotationManager:
         logging.info("Sending reboot command to all devices.")
         
         reboot_payload = "REBOOT"
+        
         try:
             self.queue_downlink(dev_eui, reboot_payload, f_port=52)
             logging.info(f"Reboot command sent successfully to device {dev_eui}.")
         except Exception as e:
             logging.error(f"Failed to send reboot command to device {dev_eui}: {e}", exc_info=True)
 
+    def send_update_frequency(self,dev_euid, update_frequency):
+        """Send update frequency to all devices."""
+        logging.info("Sending update frequency to all devices.")
         
+        data_transmission_frequency = "UPDATE_FREQUENCY:" + int(update_frequency)
+        
+        try:
+            self.queue_downlink(dev_euid, data_transmission_frequency, f_port=51)
+            logging.info(f"Update frequency {update_frequency} sent successfully to device {dev_euid}.")
+        except Exception as e:
+            logging.error(f"Failed to send update frequency to device {dev_euid}: {e}", exc_info=True)   
 
         
