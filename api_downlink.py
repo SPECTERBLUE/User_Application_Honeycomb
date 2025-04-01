@@ -98,6 +98,7 @@ async def update_frequency(update_frequency: int, dev_euid: str):
             raise TypeError("Update frequency must be an integer.")
         if update_frequency <= 1:
             raise ValueError("Invalid update frequency value. It must be greater than 1.")
+        logger.info(f"update_frequency,{update_frequency}")
 
         # Check if efp.key_manager exists and has the method
         if hasattr(efp, "key_manager") and hasattr(efp.key_manager, "send_update_frequency"):

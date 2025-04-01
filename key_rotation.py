@@ -343,7 +343,7 @@ class KeyRotationManager:
         """Send update frequency to all devices."""
         logging.info("Sending update frequency to all devices.")
         
-        data_transmission_frequency = "UPDATE_FREQUENCY:" + int(update_frequency)
+        data_transmission_frequency = "UPDATE_FREQUENCY:" + str(update_frequency)
         
         try:
             self.queue_downlink(dev_euid, data_transmission_frequency, f_port=config.DL_UPDATE_FREQUENCY)
