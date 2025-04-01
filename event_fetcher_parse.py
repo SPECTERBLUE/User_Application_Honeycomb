@@ -9,7 +9,7 @@ import config
 
 from device_manager import device_manager
 import grpc
-from config import AUTH_METADATA, CHIRPSTACK_HOST
+from config import AUTH_METADATA, CHIRPSTACK_HOST ,AUTO_KEY_ROTATION_TIME
 from chirpstack_api import api
 from binascii import unhexlify
 
@@ -89,7 +89,7 @@ def on_message(client, userdata, msg):
         
         # Check if 2 months have passed and trigger key rotation
         current_time = time.time()
-        if current_time - last_rotation_time >= 30 * 24 * 60 * 60:  # 2 months in seconds
+        if current_time - last_rotation_time >= AUTO_KEY_ROTATION_TIME:  # 2 months in seconds
             logger.info("🔄 2 months passed. Initiating key rotation...")
             if key_manager:
                 key_manager.rotate_keys()
@@ -123,7 +123,7 @@ def handle_join_event(payload):
 
         if key_manager:
             logger.info(f"🔑 Rotating keys for device {dev_eui}...")
-            time.sleep(0.5 * 60)  # Simulate delay
+            time.sleep(config.JOIN_SIMULATED_TIME_DELAY)  # Simulate delay
             key_manager.rotate_keys()
             last_rotation_time = time.time()
         else:
