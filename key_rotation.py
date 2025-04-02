@@ -351,4 +351,26 @@ class KeyRotationManager:
         except Exception as e:
             logging.error(f"Failed to send update frequency to device {dev_euid}: {e}", exc_info=True)   
 
+    def send_device_status(self, dev_euid):
+        """Send device status to all devices."""
+        logging.info("Sending device status to all devices.")
         
+        device_status_payload = "DEVICE_STATUS"
+        
+        try:
+            self.queue_downlink(dev_euid, device_status_payload, f_port=config.DL_DEVICE_STATUS)
+            logging.info(f"Device status sent successfully to device {dev_euid}.")
+        except Exception as e:
+            logging.error(f"Failed to send device status to device {dev_euid}: {e}", exc_info=True)
+            
+    def set_log_level(self, dev_euid, level):
+        """Set the log level for a specific device."""
+        logging.info("Setting log level for device.")
+        
+        set_log_level_payload = "SET_LOG_LEVEL:" + str(level)
+        
+        try:
+            self.queue_downlink(dev_euid, set_log_level_payload, f_port=config.DL_LOG_LEVEL)
+            logging.info(f"Log level {level} set successfully for device {dev_euid}.")
+        except Exception as e:
+            logging.error(f"Failed to set log level for device {dev_euid}: {e}", exc_info=True)
