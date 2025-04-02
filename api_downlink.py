@@ -190,3 +190,75 @@ async def device_reboot(dev_euid: str):
             detail="Internal Server Error: " + str(e)
         )
    
+@app.post("/downlink/device-status", status_code=status.HTTP_200_OK)
+async def device_status(dev_euid: str):
+    """
+    Endpoint to send downlink data for device status.
+    """
+    try:
+        # current status of the connected device
+        if efp.key_manager:
+            efp.key_manager.send_device_status(dev_euid)
+            return {
+                "status": "success",
+                "message": "Device status command sent successfully",
+                "dev_euid": dev_euid
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="KeyRotationManager not initialized"
+            )
+
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except PermissionError as pe:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
+        
+@app.post("/downlink/log-level", status_code=status.HTTP_200_OK)
+async def log_level(dev_euid: str,level: int):
+    """
+    Endpoint to set the logging level.
+    """
+    try:
+        # Set the logging level
+        if efp.key_manager:
+            efp.key_manager.set_log_level(dev_euid, level)
+            return {
+                "status": "success",
+                "message": "Log level set successfully",
+                "dev_euid": dev_euid,
+                "level": level
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="KeyRotationManager not initialized"
+            )
+        
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except PermissionError as pe:   
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
