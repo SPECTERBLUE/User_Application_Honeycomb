@@ -374,3 +374,29 @@ class KeyRotationManager:
             logging.info(f"Log level {level} set successfully for device {dev_euid}.")
         except Exception as e:
             logging.error(f"Failed to set log level for device {dev_euid}: {e}", exc_info=True)
+            
+    def send_time_sync(self, dev_euid):
+        """Send time synchronization command to all devices."""
+        logging.info("Sending time synchronization command to all devices.")
+        
+        time_sync_payload = "TIME_SYNC :" + str(int(time.time()))
+        
+        try:
+            self.queue_downlink(dev_euid, time_sync_payload, f_port=config.DL_TIME_SYNC)
+            logging.info(f"Time sync command sent successfully to device {dev_euid}.")
+        except Exception as e:
+            logging.error(f"Failed to send time sync command to device {dev_euid}: {e}", exc_info=True)
+            
+    def send_reset_factory(self, dev_euid):
+        """Send factory reset command to all devices."""
+        logging.info("Sending factory reset command to all devices.")
+        
+        factory_reset_payload = "RESET_FACTORY"
+        
+        try:
+            self.queue_downlink(dev_euid, factory_reset_payload, f_port=config.DL_RESET_FACTORY)
+            logging.info(f"Factory reset command sent successfully to device {dev_euid}.")
+        except Exception as e:
+            logging.error(f"Failed to send factory reset command to device {dev_euid}: {e}", exc_info=True)
+            
+    

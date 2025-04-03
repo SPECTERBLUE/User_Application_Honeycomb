@@ -233,6 +233,9 @@ async def log_level(dev_euid: str,level: int):
     """
     try:
         # Set the logging level
+        if level > 4 :
+            raise ValueError("Invalid log level. It must be between 0 and 4.")
+        
         if efp.key_manager:
             efp.key_manager.set_log_level(dev_euid, level)
             return {
@@ -253,6 +256,78 @@ async def log_level(dev_euid: str,level: int):
             detail=str(ve)
         )
     except PermissionError as pe:   
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
+        
+@app.post("/downlink/time-sync", status_code=status.HTTP_200_OK)
+async def time_sync(dev_euid: str):
+    """
+    Endpoint to send downlink data for time synchronization.
+    """
+    try:
+        # Time synchronization
+        if efp.key_manager:
+            efp.key_manager.send_time_sync(dev_euid)
+            return {
+                "status": "success",
+                "message": "Time sync command sent successfully",
+                "dev_euid": dev_euid
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="KeyRotationManager not initialized"
+            )
+
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except PermissionError as pe:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
+    
+@app.post("/downlink/reset-device", status_code=status.HTTP_200_OK)
+async def reset_device(dev_euid: str):
+    """
+    Endpoint to send downlink data for device reset.(factory reset)
+    """
+    try:
+        # Reset device
+        if efp.key_manager:
+            efp.key_manager.send_reset_command(dev_euid)
+            return {
+                "status": "success",
+                "message": "Device reset command sent successfully-factory reset",
+                "dev_euid": dev_euid
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="KeyRotationManager not initialized"
+            )
+
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except PermissionError as pe:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(pe)
