@@ -310,7 +310,7 @@ async def reset_device(dev_euid: str):
     try:
         # Reset device
         if efp.key_manager:
-            efp.key_manager.send_reset_command(dev_euid)
+            efp.key_manager.send_reset_factory(dev_euid)
             return {
                 "status": "success",
                 "message": "Device reset command sent successfully-factory reset",
