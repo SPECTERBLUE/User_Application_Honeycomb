@@ -159,13 +159,13 @@ def process_downlink_packet(packet: str):
         logging.error(f"Error parsing downlink packet: {e}", exc_info=True)
         return
 
-    if port == 76:
+    if port == config.DL_UA_PUBLIC_KEY:
         logging.info(f"Received new UA public key on FPort 76 for device {dev_eui}: {data}")
 
-    elif port == 10:
+    elif port == config.DL_KEYROTATION_SUCCESS:
         logging.info(f"Acknowledgement received on FPort 10 for device {dev_eui}: {data}")
 
-    elif port == 26:
+    elif port == config.UL_ED_PUBLIC_KEY:
         logging.info(f"Received ED public key update on FPort 26 for device {dev_eui}: {data}")
         
         # Validate if data is a valid hex string

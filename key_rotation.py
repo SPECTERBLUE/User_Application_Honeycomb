@@ -8,6 +8,7 @@ from Crypto.Cipher import AES
 from binascii import hexlify
 from typing import Tuple
 from Crypto.Util.Padding import unpad
+import config
 #from dataclasses import dataclass
 #import struct
 
@@ -301,11 +302,10 @@ class KeyRotationManager:
                 dev_eui = device_data.get("euid")
                 
                 if dev_eui and isinstance(dev_eui, str):
-                    self.queue_downlink(dev_eui, downlink_payload, f_port=76)
+                    self.queue_downlink(dev_eui, downlink_payload, f_port=config.DL_UA_PUBLIC_KEY)
                 else:
                     logging.warning(f"No devEui found for device {device_name}.")
-            #self.queue_downlink("ALL", downlink_payload, f_port=76)
-
+            
             # Send an acknowledgment
             ACK_MESSAGE = "Key rotation successful."
             ack_payload = ACK_MESSAGE
@@ -315,11 +315,10 @@ class KeyRotationManager:
                 dev_eui = device_data.get("euid")
                 
                 if dev_eui and isinstance(dev_eui, str):
-                    self.queue_downlink(dev_eui, ack_payload, f_port=10)
+                    self.queue_downlink(dev_eui, ack_payload, f_port=config.DL_KEYROTATION_SUCCESS)
                 else:
                     logging.warning(f"No devEui found for device {device_name}.")
-            #self.queue_downlink("ALL", ack_payload, f_port=10)
-
+            
             # Update last rotation timestamp
             last_rotation_time = time.time()
 
@@ -327,3 +326,77 @@ class KeyRotationManager:
 
         except Exception as e:
             logging.error(f"Error during key rotation: {e}", exc_info=True)
+            
+    def send_reboot_command(self,dev_eui):
+        """Send a reboot command to all devices."""
+        logging.info("Sending reboot command to all devices.")
+        
+        reboot_payload = "REBOOT"
+        
+        try:
+            self.queue_downlink(dev_eui, reboot_payload, f_port=config.DL_REBOOT)
+            logging.info(f"Reboot command sent successfully to device {dev_eui}.")
+        except Exception as e:
+            logging.error(f"Failed to send reboot command to device {dev_eui}: {e}", exc_info=True)
+
+    def send_update_frequency(self,dev_euid, update_frequency):
+        """Send update frequency to all devices."""
+        logging.info("Sending update frequency to all devices.")
+        
+        data_transmission_frequency = "UPDATE_FREQUENCY:" + str(update_frequency)
+        
+        try:
+            self.queue_downlink(dev_euid, data_transmission_frequency, f_port=config.DL_UPDATE_FREQUENCY)
+            logging.info(f"Update frequency {update_frequency} sent successfully to device {dev_euid}.")
+        except Exception as e:
+            logging.error(f"Failed to send update frequency to device {dev_euid}: {e}", exc_info=True)   
+
+    def send_device_status(self, dev_euid):
+        """Send device status to all devices."""
+        logging.info("Sending device status to all devices.")
+        
+        device_status_payload = "DEVICE_STATUS"
+        
+        try:
+            self.queue_downlink(dev_euid, device_status_payload, f_port=config.DL_DEVICE_STATUS)
+            logging.info(f"Device status sent successfully to device {dev_euid}.")
+        except Exception as e:
+            logging.error(f"Failed to send device status to device {dev_euid}: {e}", exc_info=True)
+            
+    def set_log_level(self, dev_euid, level):
+        """Set the log level for a specific device."""
+        logging.info("Setting log level for device.")
+        
+        set_log_level_payload = "SET_LOG_LEVEL:" + str(level)
+        
+        try:
+            self.queue_downlink(dev_euid, set_log_level_payload, f_port=config.DL_LOG_LEVEL)
+            logging.info(f"Log level {level} set successfully for device {dev_euid}.")
+        except Exception as e:
+            logging.error(f"Failed to set log level for device {dev_euid}: {e}", exc_info=True)
+            
+    def send_time_sync(self, dev_euid):
+        """Send time synchronization command to all devices."""
+        logging.info("Sending time synchronization command to all devices.")
+        
+        time_sync_payload = "TIME_SYNC :" + str(int(time.time()))
+        
+        try:
+            self.queue_downlink(dev_euid, time_sync_payload, f_port=config.DL_TIME_SYNC)
+            logging.info(f"Time sync command sent successfully to device {dev_euid}.")
+        except Exception as e:
+            logging.error(f"Failed to send time sync command to device {dev_euid}: {e}", exc_info=True)
+            
+    def send_reset_factory(self, dev_euid):
+        """Send factory reset command to all devices."""
+        logging.info("Sending factory reset command to all devices.")
+        
+        factory_reset_payload = "RESET_FACTORY"
+        
+        try:
+            self.queue_downlink(dev_euid, factory_reset_payload, f_port=config.DL_RESET_FACTORY)
+            logging.info(f"Factory reset command sent successfully to device {dev_euid}.")
+        except Exception as e:
+            logging.error(f"Failed to send factory reset command to device {dev_euid}: {e}", exc_info=True)
+            
+    

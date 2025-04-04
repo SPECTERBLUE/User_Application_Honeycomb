@@ -54,9 +54,9 @@
     //   { bn: "urn:dev:" + jsonObj.DevEUI + ":", bt: 1792200255, n: "yaw", u: "deg", v: jsonObj.yaw }
     // ];
     retObj = { data: [
-      {bn: "imu_" + dev_eui, n:"_gx", u:"deg/sec", v:jsonObj.g[0]},
-      {bn: "imu_" + dev_eui, n:"_gy", u:"deg/sec", v:jsonObj.g[1]},
-      {bn: "imu_" + dev_eui, n:"_gz", u:"deg/sec", v:jsonObj.g[2]},
+      {bn: "imu_" + dev_eui, n:"_pitch_x", u:"deg", v:jsonObj.angle[0]},
+      {bn: "imu_" + dev_eui, n:"_roll_y", u:"deg", v:jsonObj.angle[1]},
+      {bn: "imu_" + dev_eui, n:"_yaw_z", u:"deg", v:jsonObj.angle[2]},
     ]};
     console.log(retObj);
     return retObj;
