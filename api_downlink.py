@@ -1,8 +1,12 @@
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Path
+from fastapi.responses import JSONResponse
 import event_fetcher_parse as efp
 import json
 import os
 import logging
+import subprocess
+import config
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.ERROR)
@@ -322,6 +326,172 @@ async def reset_device(dev_euid: str):
                 detail="KeyRotationManager not initialized"
             )
 
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except PermissionError as pe:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
+    
+# Mapping container roles to their Docker names
+CONTAINERS = {
+    "edgex": config.CONTAINER_EDGEX_SECURITY_PROXY,     # Used for EdgeX user/password management
+    "chirpstack": config.CONTAINER_CHIRPSTACK,            # ChirpStack container for CLI operations
+    "root": config.CONTAINER_VAULT          # Container that holds the Vault token config
+}
+
+# Path to the Vault response JSON file inside the container
+ROOT_FILE_PATH = config.VAULT_ROOT_PATH
+
+# === FastAPI Endpoints ===
+
+def run_command(command: str) -> dict:
+    """
+    Executes a shell command and returns its output.
+    If it fails, raises an appropriate HTTP exception.
+    """
+    try:
+        result = subprocess.run(command, shell=True, text=True, capture_output=True)
+        if result.returncode != 0:
+            logging.error(f"Command Error: {result.stderr}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Docker command failed: {result.stderr}"
+            )
+        return {"output": result.stdout.strip()}
+    except HTTPException as he:
+        raise he
+    except PermissionError as pe:
+        # Handle insufficient system permissions
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except Exception as e:
+        # Catch-all for unexpected errors
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
+
+
+@app.get("/downlink/generate-password/{username}", summary="Generate EdgeX Password", description="Generates a password for EdgeX.")
+async def generate_password(username: str):
+    """
+    Creates a new EdgeX user with a password using Docker exec.
+    """
+    try:
+        logging.info(f"Generating password for: {username}")
+        # Command to create a new EdgeX user with temporary JWT token access
+        cmd = (
+            f"docker exec {CONTAINERS['edgex']} ./secrets-config proxy adduser "
+            f"--user \"{username}\" --tokenTTL 60 --jwtTTL 119m --useRootToken"
+        )
+        output = subprocess.check_output(cmd, shell=True, text=True).strip()
+        parsed_output = json.loads(output)
+
+        # Return password from the Docker command output
+        return {
+            "status": "success",
+            "message": "User password generated successfully",
+            "password": parsed_output.get("password", "No password found")
+        }
+    except ValueError as ve:
+        # Handle malformed JSON or command output
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except PermissionError as pe:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
+
+
+@app.get("/downlink/create-chirpstack-api-key/{name}", summary="Create ChirpStack API Key", description="Creates an API key in ChirpStack.")
+async def create_api_key(name: str = Path(..., min_length=1, description="API key name")):
+    """
+    Uses the ChirpStack CLI inside the container to generate an API key.
+    """
+    try:
+        # Validate API key name format
+        if not name.strip() or name == ":name" or not re.match(r'^[a-zA-Z0-9_\-]+$', name):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or missing 'name' parameter"
+            )
+
+        logging.info(f"Creating ChirpStack API key for: {name}")
+
+        # ChirpStack CLI command to create a new API key with the given name
+        cmd = (
+            f"docker exec {CONTAINERS['chirpstack']} "
+            f"chirpstack --config /etc/chirpstack "
+            f"create-api-key --name '{name}'"
+        )
+        output = subprocess.check_output(cmd, shell=True, text=True).strip()
+
+        # Extract the token from command output using regex
+        match = re.search(r'token: (\S+)', output)
+        token = match.group(1) if match else "No API key found"
+
+        return {
+            "status": "success",
+            "message": "API key created successfully",
+            "api_key": token
+        }
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except PermissionError as pe:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
+
+
+@app.get("/downlink/tokens", summary="Get Root Token", description="Extracts the last root token and returns it as JSON.")
+def get_tokens():
+    """
+    Reads the root token from the Vault response JSON file inside the container.
+    """
+    try:
+        logging.info("Extracting root token...")
+        # Command to read the root token file using Docker
+        cmd = f"docker exec {CONTAINERS['root']} cat {ROOT_FILE_PATH}"
+        output = subprocess.check_output(cmd, shell=True, text=True).strip()
+
+        # Parse the JSON output to extract the root token
+        parsed_output = json.loads(output)
+        root_token = parsed_output.get("root_token", "No root token found")
+
+        return {
+            "status": "success",
+            "message": "Root token retrieved successfully",
+            "root_token": root_token
+        }
     except ValueError as ve:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

@@ -1,6 +1,6 @@
 # ChirpStack gRPC Configuration
-CHIRPSTACK_HOST = "192.168.0.71:8088"  # Ensure this is the correct ChirpStack gRPC server address
-API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjaGlycHN0YWNrIiwiaXNzIjoiY2hpcnBzdGFjayIsInN1YiI6IjEzYWFkNjExLWQwNGQtNDZmMC05NTVjLTEzZmJkNDJmOWRiMCIsInR5cCI6ImtleSJ9.6HEmWED6JC52WiK_KjGHcC3Leazti9HINqyQAKfxmk0"  # Replace with your ChirpStack API token
+CHIRPSTACK_HOST = "localhost:8088"  # Ensure this is the correct ChirpStack gRPC server address
+API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjaGlycHN0YWNrIiwiaXNzIjoiY2hpcnBzdGFjayIsInN1YiI6IjFlMGQzMTAzLTY3ZGMtNGYxMi1iZjRlLTdkY2IyNjI2NDBhZiIsInR5cCI6ImtleSJ9.HxodGM0g8I9Ws8yTYNw8KFa5iP9NEUNvqV1HJVJ60No"  # Replace with your ChirpStack API token
 
 # Not needed
 APPLICATION_ID = None  # Remove hardcoded Application ID
@@ -15,7 +15,7 @@ LIMIT = 100
 OFFSET = 0
 
 # mqtt
-mqtt = "192.168.0.71"
+mqtt = "localhost"
 
 # Add authorization metadata
 AUTH_METADATA = [("authorization", f"Bearer {API_TOKEN}")]
@@ -38,3 +38,10 @@ DL_DEVICE_STATUS = 55
 DL_LOG_LEVEL = 62
 DL_TIME_SYNC = 60
 DL_RESET_FACTORY = 61
+
+#API
+CONTAINER_EDGEX_SECURITY_PROXY = "edgex-security-proxy-setup"
+CONTAINER_CHIRPSTACK = "chirpstack-chirpstack-1"
+CONTAINER_VAULT = "edgex-security-secretstore-setup"
+
+VAULT_ROOT_PATH = "/vault/config/assets/resp-init.json"
