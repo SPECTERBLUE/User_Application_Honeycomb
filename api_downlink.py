@@ -341,17 +341,22 @@ async def reset_device(dev_euid: str):
             detail="Internal Server Error: " + str(e)
         )
     
+# Mapping container roles to their Docker names
 CONTAINERS = {
-    "edgex": "edgex-security-proxy-setup",
-    "chirpstack": "chirpstack-chirpstack-1",
-    "root": "edgex-security-secretstore-setup"
+    "edgex": "edgex-security-proxy-setup",              # Used for EdgeX user/password management
+    "chirpstack": "chirpstack-chirpstack-1",            # ChirpStack container for CLI operations
+    "root": "edgex-security-secretstore-setup"          # Container that holds the Vault token config
 }
+
+# Path to the Vault response JSON file inside the container
 ROOT_FILE_PATH = "/vault/config/assets/resp-init.json"
 
 # === FastAPI Endpoints ===
+
 def run_command(command: str) -> dict:
     """
-    Executes a command on the local system.
+    Executes a shell command and returns its output.
+    If it fails, raises an appropriate HTTP exception.
     """
     try:
         result = subprocess.run(command, shell=True, text=True, capture_output=True)
@@ -365,32 +370,42 @@ def run_command(command: str) -> dict:
     except HTTPException as he:
         raise he
     except PermissionError as pe:
+        # Handle insufficient system permissions
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(pe)
         )
     except Exception as e:
+        # Catch-all for unexpected errors
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal Server Error: " + str(e)
         )
 
+
 @app.get("/downlink/generate-password/{username}", summary="Generate EdgeX Password", description="Generates a password for EdgeX.")
 async def generate_password(username: str):
+    """
+    Creates a new EdgeX user with a password using Docker exec.
+    """
     try:
         logging.info(f"Generating password for: {username}")
+        # Command to create a new EdgeX user with temporary JWT token access
         cmd = (
             f"docker exec {CONTAINERS['edgex']} ./secrets-config proxy adduser "
             f"--user \"{username}\" --tokenTTL 60 --jwtTTL 119m --useRootToken"
         )
         output = subprocess.check_output(cmd, shell=True, text=True).strip()
         parsed_output = json.loads(output)
+
+        # Return password from the Docker command output
         return {
             "status": "success",
             "message": "User password generated successfully",
             "password": parsed_output.get("password", "No password found")
         }
     except ValueError as ve:
+        # Handle malformed JSON or command output
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(ve)
@@ -406,23 +421,34 @@ async def generate_password(username: str):
             detail="Internal Server Error: " + str(e)
         )
 
+
 @app.get("/downlink/create-chirpstack-api-key/{name}", summary="Create ChirpStack API Key", description="Creates an API key in ChirpStack.")
 async def create_api_key(name: str = Path(..., min_length=1, description="API key name")):
+    """
+    Uses the ChirpStack CLI inside the container to generate an API key.
+    """
     try:
+        # Validate API key name format
         if not name.strip() or name == ":name" or not re.match(r'^[a-zA-Z0-9_\-]+$', name):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or missing 'name' parameter"
             )
+
         logging.info(f"Creating ChirpStack API key for: {name}")
+
+        # ChirpStack CLI command to create a new API key with the given name
         cmd = (
             f"docker exec {CONTAINERS['chirpstack']} "
             f"chirpstack --config /etc/chirpstack "
             f"create-api-key --name '{name}'"
         )
         output = subprocess.check_output(cmd, shell=True, text=True).strip()
+
+        # Extract the token from command output using regex
         match = re.search(r'token: (\S+)', output)
         token = match.group(1) if match else "No API key found"
+
         return {
             "status": "success",
             "message": "API key created successfully",
@@ -444,14 +470,22 @@ async def create_api_key(name: str = Path(..., min_length=1, description="API ke
             detail="Internal Server Error: " + str(e)
         )
 
+
 @app.get("/downlink/tokens", summary="Get Root Token", description="Extracts the last root token and returns it as JSON.")
 def get_tokens():
+    """
+    Reads the root token from the Vault response JSON file inside the container.
+    """
     try:
         logging.info("Extracting root token...")
+        # Command to read the root token file using Docker
         cmd = f"docker exec {CONTAINERS['root']} cat {ROOT_FILE_PATH}"
         output = subprocess.check_output(cmd, shell=True, text=True).strip()
+
+        # Parse the JSON output to extract the root token
         parsed_output = json.loads(output)
         root_token = parsed_output.get("root_token", "No root token found")
+
         return {
             "status": "success",
             "message": "Root token retrieved successfully",
