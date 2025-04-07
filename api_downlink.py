@@ -5,6 +5,7 @@ import json
 import os
 import logging
 import subprocess
+import config
 import re
 
 # Configure logging
@@ -343,13 +344,13 @@ async def reset_device(dev_euid: str):
     
 # Mapping container roles to their Docker names
 CONTAINERS = {
-    "edgex": "edgex-security-proxy-setup",              # Used for EdgeX user/password management
-    "chirpstack": "chirpstack-chirpstack-1",            # ChirpStack container for CLI operations
-    "root": "edgex-security-secretstore-setup"          # Container that holds the Vault token config
+    "edgex": config.CONTAINER_EDGEX_SECURITY_PROXY,     # Used for EdgeX user/password management
+    "chirpstack": config.CONTAINER_CHIRPSTACK,            # ChirpStack container for CLI operations
+    "root": config.CONTAINER_VAULT          # Container that holds the Vault token config
 }
 
 # Path to the Vault response JSON file inside the container
-ROOT_FILE_PATH = "/vault/config/assets/resp-init.json"
+ROOT_FILE_PATH = config.VAULT_ROOT_PATH
 
 # === FastAPI Endpoints ===
 
