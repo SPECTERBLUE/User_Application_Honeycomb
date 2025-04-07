@@ -1,8 +1,11 @@
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Path
+from fastapi.responses import JSONResponse
 import event_fetcher_parse as efp
 import json
 import os
 import logging
+import subprocess
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.ERROR)
@@ -322,6 +325,138 @@ async def reset_device(dev_euid: str):
                 detail="KeyRotationManager not initialized"
             )
 
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except PermissionError as pe:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
+    
+CONTAINERS = {
+    "edgex": "edgex-security-proxy-setup",
+    "chirpstack": "chirpstack-chirpstack-1",
+    "root": "edgex-security-secretstore-setup"
+}
+ROOT_FILE_PATH = "/vault/config/assets/resp-init.json"
+
+# === FastAPI Endpoints ===
+def run_command(command: str) -> dict:
+    """
+    Executes a command on the local system.
+    """
+    try:
+        result = subprocess.run(command, shell=True, text=True, capture_output=True)
+        if result.returncode != 0:
+            logging.error(f"Command Error: {result.stderr}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Docker command failed: {result.stderr}"
+            )
+        return {"output": result.stdout.strip()}
+    except HTTPException as he:
+        raise he
+    except PermissionError as pe:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
+
+@app.get("/downlink/generate-password/{username}", summary="Generate EdgeX Password", description="Generates a password for EdgeX.")
+async def generate_password(username: str):
+    try:
+        logging.info(f"Generating password for: {username}")
+        cmd = (
+            f"docker exec {CONTAINERS['edgex']} ./secrets-config proxy adduser "
+            f"--user \"{username}\" --tokenTTL 60 --jwtTTL 119m --useRootToken"
+        )
+        output = subprocess.check_output(cmd, shell=True, text=True).strip()
+        parsed_output = json.loads(output)
+        return {
+            "status": "success",
+            "message": "User password generated successfully",
+            "password": parsed_output.get("password", "No password found")
+        }
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except PermissionError as pe:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
+
+@app.get("/downlink/create-chirpstack-api-key/{name}", summary="Create ChirpStack API Key", description="Creates an API key in ChirpStack.")
+async def create_api_key(name: str = Path(..., min_length=1, description="API key name")):
+    try:
+        if not name.strip() or name == ":name" or not re.match(r'^[a-zA-Z0-9_\-]+$', name):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or missing 'name' parameter"
+            )
+        logging.info(f"Creating ChirpStack API key for: {name}")
+        cmd = (
+            f"docker exec {CONTAINERS['chirpstack']} "
+            f"chirpstack --config /etc/chirpstack "
+            f"create-api-key --name '{name}'"
+        )
+        output = subprocess.check_output(cmd, shell=True, text=True).strip()
+        match = re.search(r'token: (\S+)', output)
+        token = match.group(1) if match else "No API key found"
+        return {
+            "status": "success",
+            "message": "API key created successfully",
+            "api_key": token
+        }
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except PermissionError as pe:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
+
+@app.get("/downlink/tokens", summary="Get Root Token", description="Extracts the last root token and returns it as JSON.")
+def get_tokens():
+    try:
+        logging.info("Extracting root token...")
+        cmd = f"docker exec {CONTAINERS['root']} cat {ROOT_FILE_PATH}"
+        output = subprocess.check_output(cmd, shell=True, text=True).strip()
+        parsed_output = json.loads(output)
+        root_token = parsed_output.get("root_token", "No root token found")
+        return {
+            "status": "success",
+            "message": "Root token retrieved successfully",
+            "root_token": root_token
+        }
     except ValueError as ve:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
