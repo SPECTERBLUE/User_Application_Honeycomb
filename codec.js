@@ -23,12 +23,10 @@
     3) Sensor Data Decoders
    ************************************************************/
   function TemperatureDataDecoder() {}
-  TemperatureDataDecoder.prototype.decode = function (jsonObj) {
-    if (typeof jsonObj.Value !== "number") {
-      throw new Error("Missing numeric 'Value' for Temperature");
-    }
-    validateRange(jsonObj.Value, -50, 125, "Temperature");
-    return [{ bn: "urn:dev:" + jsonObj.DevEUI + ":", bt: 1792200255, n: "temperature", u: "Cel", v: jsonObj.Value }];
+  TemperatureDataDecoder.prototype.decode = function (jsonObj, dev_eui) {
+    retObj = {data:[{ bn: "temperature_" + dev_eui, n: "_temperature", u: "celcius", v: jsonObj.temperature }]};
+    console.log(retObj);
+    return retObj;
   };
   
   function HumidityDataDecoder() {}
@@ -93,7 +91,7 @@
         throw new Error("Missing 'fport' in JSON");
       }
       var decoders = {
-        "TEMP": new TemperatureDataDecoder(),
+        2: new TemperatureDataDecoder(),
         "HUM": new HumidityDataDecoder(),
         3: new IMUDataDecoder(),
         "VIB": new VibrationDataDecoder(),
