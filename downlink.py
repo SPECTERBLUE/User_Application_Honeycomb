@@ -331,6 +331,9 @@ def send_data_mqtt(decoded_data, dev_eui):
     :param dev_eui: Device EUI used to build the topic.
     """
     try:
+        if not dev_eui:
+            raise ValueError("Device EUI is missing.")
+        
         # Convert JsObjectWrapper to a Python dict/list
         if isinstance(decoded_data, js2py.base.JsObjectWrapper):
             try:
@@ -342,10 +345,16 @@ def send_data_mqtt(decoded_data, dev_eui):
 
         if MQTT_USERNAME and MQTT_PASSWORD:
             client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+            logging.info("Using MQTT credentials for authentication.")
+        else:
+            logging.info("Connecting to MQTT without authentication.")
 
         client.connect(MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE)
 
         topic = f"Honeycomb/device/{dev_eui}" # Construct the topic using dev_eui
+        
+        if "data" not in decoded_data:
+            logging.warning("Expected 'data' key missing in decoded_data. Sending entire payload.")
         
         # Ensure decoded_data is properly formatted as JSON
         payload = json.dumps(decoded_data['data'], indent=2)  
