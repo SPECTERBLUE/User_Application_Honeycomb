@@ -23,12 +23,10 @@
     3) Sensor Data Decoders
    ************************************************************/
   function TemperatureDataDecoder() {}
-  TemperatureDataDecoder.prototype.decode = function (jsonObj) {
-    if (typeof jsonObj.Value !== "number") {
-      throw new Error("Missing numeric 'Value' for Temperature");
-    }
-    validateRange(jsonObj.Value, -50, 125, "Temperature");
-    return [{ bn: "urn:dev:" + jsonObj.DevEUI + ":", bt: 1792200255, n: "temperature", u: "Cel", v: jsonObj.Value }];
+  TemperatureDataDecoder.prototype.decode = function (jsonObj, dev_eui) {
+    retObj = {data:[{ bn: "temperature_" + dev_eui, n: "_temperature", u: "celcius", v: jsonObj.temperature, timestamp: jsonObj.timestamp }]};
+    console.log(retObj);
+    return retObj;
   };
   
   function HumidityDataDecoder() {}
@@ -37,7 +35,7 @@
       throw new Error("Missing numeric 'Value' for Humidity");
     }
     validateRange(jsonObj.Value, 0, 100, "Humidity");
-    return [{ bn: "urn:dev:" + jsonObj.DevEUI + ":", bt: 1792200255, n: "humidity", u: "%RH", v: jsonObj.Value }];
+    return [{ bn: "urn:dev:" + jsonObj.DevEUI + ":", bt: 1792200255, n: "humidity", u: "%RH", v: jsonObj.Value, timestamp: jsonObj.timestamp }];
   };
   
   function IMUDataDecoder() {}
@@ -54,9 +52,9 @@
     //   { bn: "urn:dev:" + jsonObj.DevEUI + ":", bt: 1792200255, n: "yaw", u: "deg", v: jsonObj.yaw }
     // ];
     retObj = { data: [
-      {bn: "imu_" + dev_eui, n:"_pitch_x", u:"deg", v:jsonObj.angle[0]},
-      {bn: "imu_" + dev_eui, n:"_roll_y", u:"deg", v:jsonObj.angle[1]},
-      {bn: "imu_" + dev_eui, n:"_yaw_z", u:"deg", v:jsonObj.angle[2]},
+      {bn: "imu_" + dev_eui, n:"_pitch_x", u:"deg", v:jsonObj.angle[0], timestamp: jsonObj.timestamp},
+      {bn: "imu_" + dev_eui, n:"_roll_y", u:"deg", v:jsonObj.angle[1], timestamp: jsonObj.timestamp},
+      {bn: "imu_" + dev_eui, n:"_yaw_z", u:"deg", v:jsonObj.angle[2], timestamp: jsonObj.timestamp},
     ]};
     console.log(retObj);
     return retObj;
@@ -77,7 +75,7 @@
       throw new Error("Missing numeric 'distance' for Distance");
     }
     validateRange(jsonObj.distance, 0, 100, "Distance");
-    retObj = {data:[{ bn: "distance_" + dev_eui, n: "_distance", u: "cm", v: jsonObj.distance }]};
+    retObj = {data:[{ bn: "distance_" + dev_eui, n: "_distance", u: "cm", v: jsonObj.distance, timestamp: jsonObj.timestamp}]};
     console.log(retObj);
     return retObj;
   };
@@ -93,7 +91,7 @@
         throw new Error("Missing 'fport' in JSON");
       }
       var decoders = {
-        "TEMP": new TemperatureDataDecoder(),
+        2: new TemperatureDataDecoder(),
         "HUM": new HumidityDataDecoder(),
         3: new IMUDataDecoder(),
         "VIB": new VibrationDataDecoder(),
