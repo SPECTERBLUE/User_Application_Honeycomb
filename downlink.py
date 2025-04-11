@@ -7,6 +7,14 @@ import config
 from send_http_request import HttpSender
 import grpc
 import json
+import paho.mqtt.client as mqtt
+
+MQTT_BROKER = config.mqtt  # Or use the container hostname if running elsewhere
+MQTT_PORT = 1883
+MQTT_KEEPALIVE = config.keepalive  # Keep-alive interval in seconds
+MQTT_USERNAME = None  # Set if using authentication
+MQTT_PASSWORD = None
+
 
 # Configure logging
 logging.basicConfig(
@@ -263,6 +271,8 @@ def process_downlink_packet(packet: str):
             # Ensure decoded_data is valid before sending
             if decoded_data:
                 send_data(decoded_data, application_id)  # Send decoded data with dynamic application ID
+                send_data_mqtt(decoded_data, dev_eui) # Send decoded data to MQTT
+
             else:
                 logging.error("Decoded data is empty")
             return decoded_data
@@ -312,3 +322,44 @@ def send_data(decoded_data, application_id):
 
     except Exception as e:
         logging.error(f"Failed to send payload to application {application_id}: {e}", exc_info=True)
+        
+def send_data_mqtt(decoded_data, dev_eui):
+    """
+    Publishes decoded data to an MQTT topic using the dev_eui.
+
+    :param decoded_data: Decoded sensor data (dict or list).
+    :param dev_eui: Device EUI used to build the topic.
+    """
+    try:
+        # Convert JsObjectWrapper to a Python dict/list
+        if isinstance(decoded_data, js2py.base.JsObjectWrapper):
+            try:
+                decoded_data = decoded_data.to_dict()
+            except AttributeError:
+                decoded_data = decoded_data.to_list()
+
+        client = mqtt.Client()
+
+        if MQTT_USERNAME and MQTT_PASSWORD:
+            client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+
+        client.connect(MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE)
+
+        topic = f"Honeycomb/device/{dev_eui}" # Construct the topic using dev_eui
+        
+        # Ensure decoded_data is properly formatted as JSON
+        payload = json.dumps(decoded_data['data'], indent=2)  
+
+        result = client.publish(topic, payload)
+        result.wait_for_publish()
+
+        if result.is_published():
+            logging.info(f"Published data to MQTT topic {topic}: {payload}")
+        else:
+            logging.warning(f"Failed to publish to MQTT topic {topic}")
+
+        client.disconnect()
+
+    except Exception as e:
+        logging.error(f"MQTT publish failed for device {dev_eui}: {e}", exc_info=True)
+
