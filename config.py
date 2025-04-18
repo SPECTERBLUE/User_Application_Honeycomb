@@ -16,6 +16,7 @@ OFFSET = 0
 
 # mqtt
 mqtt = "localhost"
+keepalive = 60
 
 # Add authorization metadata
 AUTH_METADATA = [("authorization", f"Bearer {API_TOKEN}")]

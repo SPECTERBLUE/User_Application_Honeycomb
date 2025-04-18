@@ -1,0 +1,478 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+      "title": "FastAPI",
+      "version": "0.1.0"
+    },
+    "paths": {
+      "/downlink/reset-keyrotation": {
+        "post": {
+          "summary": "Resetkeyrotation",
+          "description": "Endpoint to send downlink data for resetting key rotation.",
+          "operationId": "resetkeyrotation_downlink_reset_keyrotation_post",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Data"
+                }
+              }
+            },
+            "required": true
+          },
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+  
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/downlink/update-frequency": {
+        "post": {
+          "summary": "Update Frequency",
+          "description": "Endpoint to send downlink data for updating frequency.",
+          "operationId": "update_frequency_downlink_update_frequency_post",
+          "parameters": [
+            {
+              "name": "update_frequency",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "integer",
+                "title": "Update Frequency"
+              }
+            },
+            {
+              "name": "dev_euid",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "title": "Dev Euid"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+  
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/downlink/get-config": {
+        "get": {
+          "summary": "Get Config",
+          "description": "Endpoint to retrieve stored update frequency and dev_euid.",
+          "operationId": "get_config_downlink_get_config_get",
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+  
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/downlink/device-reboot": {
+        "post": {
+          "summary": "Device Reboot",
+          "description": "Endpoint to send downlink data for device reboot.",
+          "operationId": "device_reboot_downlink_device_reboot_post",
+          "parameters": [
+            {
+              "name": "dev_euid",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "title": "Dev Euid"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+  
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/downlink/device-status": {
+        "post": {
+          "summary": "Device Status",
+          "description": "Endpoint to send downlink data for device status.",
+          "operationId": "device_status_downlink_device_status_post",
+          "parameters": [
+            {
+              "name": "dev_euid",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "title": "Dev Euid"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+  
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/downlink/log-level": {
+        "post": {
+          "summary": "Log Level",
+          "description": "Endpoint to set the logging level.",
+          "operationId": "log_level_downlink_log_level_post",
+          "parameters": [
+            {
+              "name": "dev_euid",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "title": "Dev Euid"
+              }
+            },
+            {
+              "name": "level",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "integer",
+                "title": "Level"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+  
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/downlink/time-sync": {
+        "post": {
+          "summary": "Time Sync",
+          "description": "Endpoint to send downlink data for time synchronization.",
+          "operationId": "time_sync_downlink_time_sync_post",
+          "parameters": [
+            {
+              "name": "dev_euid",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "title": "Dev Euid"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+  
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/downlink/reset-device": {
+        "post": {
+          "summary": "Reset Device",
+          "description": "Endpoint to send downlink data for device reset.(factory reset)",
+          "operationId": "reset_device_downlink_reset_device_post",
+          "parameters": [
+            {
+              "name": "dev_euid",
+              "in": "query",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "title": "Dev Euid"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+  
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/downlink/generate-password/{username}": {
+        "get": {
+          "summary": "Generate EdgeX Password",
+          "description": "Generates a password for EdgeX.",
+          "operationId": "generate_password_downlink_generate_password__username__get",
+          "parameters": [
+            {
+              "name": "username",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "title": "Username"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+  
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/downlink/create-chirpstack-api-key/{name}": {
+        "get": {
+          "summary": "Create ChirpStack API Key",
+          "description": "Creates an API key in ChirpStack.",
+          "operationId": "create_api_key_downlink_create_chirpstack_api_key__name__get",
+          "parameters": [
+            {
+              "name": "name",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "minLength": 1,
+                "description": "API key name",
+                "title": "Name"
+              },
+              "description": "API key name"
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+  
+                  }
+                }
+              }
+            },
+            "422": {
+              "description": "Validation Error",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/HTTPValidationError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/downlink/tokens": {
+        "get": {
+          "summary": "Get Root Token",
+          "description": "Extracts the last root token and returns it as JSON.",
+          "operationId": "get_tokens_downlink_tokens_get",
+          "responses": {
+            "200": {
+              "description": "Successful Response",
+              "content": {
+                "application/json": {
+                  "schema": {
+  
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "components": {
+      "schemas": {
+        "HTTPValidationError": {
+          "properties": {
+            "detail": {
+              "items": {
+                "$ref": "#/components/schemas/ValidationError"
+              },
+              "type": "array",
+              "title": "Detail"
+            }
+          },
+          "type": "object",
+          "title": "HTTPValidationError"
+        },
+        "ValidationError": {
+          "properties": {
+            "loc": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              },
+              "type": "array",
+              "title": "Location"
+            },
+            "msg": {
+              "type": "string",
+              "title": "Message"
+            },
+            "type": {
+              "type": "string",
+              "title": "Error Type"
+            }
+          },
+          "type": "object",
+          "required": [
+            "loc",
+            "msg",
+            "type"
+          ],
+          "title": "ValidationError"
+        }
+      }
+    }
+  }
