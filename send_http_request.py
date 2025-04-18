@@ -55,7 +55,8 @@ class HttpSender:
         with ThreadPoolExecutor(max_workers=len(endpoints_with_headers)) as executor:
             futures = []
             for endpoint, headers_from_api in endpoints_with_headers:
-                headers = {"Content-Type": "application/json"}  # Default header
+                headers = {"Content-Type": "application/json",  # Default header
+                           "Authorization": headers_from_api.get("Authorization-1", "")}  
                 
                 # Add Authorization headers if it's an HTTP endpoint
                 if "channels" in endpoint:
