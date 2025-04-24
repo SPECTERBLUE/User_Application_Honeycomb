@@ -1,0 +1,14 @@
+[
+    {
+        "username": "admin",
+        "token": ""
+    },
+    {
+        "username": "user1",
+        "token": "1234567"
+    },
+    {
+        "username": "user9",
+        "token": ""
+    }
+]

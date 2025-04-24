@@ -1,6 +1,6 @@
 # ChirpStack gRPC Configuration
-CHIRPSTACK_HOST = "localhost:8088"  # Ensure this is the correct ChirpStack gRPC server address
-API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjaGlycHN0YWNrIiwiaXNzIjoiY2hpcnBzdGFjayIsInN1YiI6IjFlMGQzMTAzLTY3ZGMtNGYxMi1iZjRlLTdkY2IyNjI2NDBhZiIsInR5cCI6ImtleSJ9.HxodGM0g8I9Ws8yTYNw8KFa5iP9NEUNvqV1HJVJ60No"  # Replace with your ChirpStack API token
+CHIRPSTACK_HOST = "10.12.82.105:8088"  # Ensure this is the correct ChirpStack gRPC server address
+API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjaGlycHN0YWNrIiwiaXNzIjoiY2hpcnBzdGFjayIsInN1YiI6ImE0NjI3ZjRjLWE3YTYtNGVlOS1hNmY5LTg4NTkxYmQ5OTkyMiIsInR5cCI6ImtleSJ9.ZjTTZo9cP04GOiqeS3jvZZB5wg4lRDOAo6bxJHRQ2zQ"  # Replace with your ChirpStack API token
 
 # Not needed
 APPLICATION_ID = None  # Remove hardcoded Application ID
@@ -15,7 +15,7 @@ LIMIT = 100
 OFFSET = 0
 
 # mqtt
-mqtt = "localhost"
+mqtt = "10.12.82.105"
 keepalive = 60
 
 # Add authorization metadata
@@ -46,3 +46,13 @@ CONTAINER_CHIRPSTACK = "chirpstack-chirpstack-1"
 CONTAINER_VAULT = "edgex-security-secretstore-setup"
 
 VAULT_ROOT_PATH = "/vault/config/assets/resp-init.json"
+
+# base url for user fetcher from honeycomb
+BASE_URL = "http://10.12.82.105:80"
+
+# user credentials for honeycomb
+Username = "admin@mdl.com"
+Password = "grse2024"
+
+# Domain name  for honeycomb
+Domain = "GRSE"
