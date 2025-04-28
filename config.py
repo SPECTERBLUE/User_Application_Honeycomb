@@ -1,7 +1,6 @@
 # ChirpStack gRPC Configuration
 CHIRPSTACK_HOST = "10.12.82.105:8088"  # Ensure this is the correct ChirpStack gRPC server address
-API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjaGlycHN0YWNrIiwiaXNzIjoiY2hpcnBzdGFjayIsInN1YiI6ImE0NjI3ZjRjLWE3YTYtNGVlOS1hNmY5LTg4NTkxYmQ5OTkyMiIsInR5cCI6ImtleSJ9.ZjTTZo9cP04GOiqeS3jvZZB5wg4lRDOAo6bxJHRQ2zQ"  # Replace with your ChirpStack API token
-
+API_TOKEN = ""  # Replace with your API token
 # Not needed
 APPLICATION_ID = None  # Remove hardcoded Application ID
 TENANT_ID = None  # Replace with your tenant ID
