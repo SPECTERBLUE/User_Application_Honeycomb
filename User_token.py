@@ -63,52 +63,122 @@ def update_user_list():
         logger.info("edgex_users.json updated successfully.")
     except Exception as e:
         logger.error(f"Error writing to JSON file: {e}")
-        
-import requests
-import json
-import logging
+   
+    # Log the contents of edgex_users.json
 
-logger = logging.getLogger(__name__)
+
+
+EDGEX_USERS_FILE = "edgex_users.json"
+ADMIN_TOKEN_URL = "http://183.82.1.171:8200/v1/identity/oidc/token/admin"
+RULES_LIST_URL = "https://edge.meridiandatalabs.com/rules-engine/rules"
+RULE_DETAIL_URL_TEMPLATE = "https://edge.meridiandatalabs.com/rules-engine/rules/{rule_name}"
+RULE_UPDATE_URL_TEMPLATE = "https://edge.meridiandatalabs.com/rules-engine/rules/{rule_name}"
 
 def JWT_token_generator():
-    """Generates and logs JWT tokens for all users in edgex_users.json."""
+    """Generates and uses JWT token for the admin user to fetch rules, modify Authorization, and update them."""
+
+    # Step 1: Read admin token from edgex_users.json
     try:
-        with open("edgex_users.json", "r") as f:
+        with open(EDGEX_USERS_FILE, "r") as f:
             data = json.load(f)
+        admin_entry = next((entry for entry in data if entry.get("username") == "admin"), None)
 
-        for entry in data:
-            username = entry.get("username")
-            token = entry.get("token")
+        if not admin_entry or not admin_entry.get("token"):
+            logger.warning("Admin user not found or missing token in edgex_users.json.")
+            return
 
-            if not username or not token:
-                logger.warning(f"Missing username or token for entry: {entry}")
-                continue
+        admin_token = admin_entry["token"]
+    except Exception as e:
+        logger.error(f"Error reading {EDGEX_USERS_FILE}: {e}")
+        return
 
-            logger.info(f"Using token for {username}")
-            url = f"http://183.82.1.171:8200/v1/identity/oidc/token/{username}"
+    # Step 2: Use admin token to get fresh JWT
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {admin_token}'
+    }
 
-            headers = {
+    try:
+        response = requests.get(ADMIN_TOKEN_URL, headers=headers)
+        response.raise_for_status()
+
+        jwt_token = response.json().get("data", {}).get("token")
+        if not jwt_token:
+            logger.warning("No JWT token found for admin.")
+            return
+
+        logger.info("JWT token fetched for admin.")
+
+    except requests.RequestException as req_err:
+        logger.error(f"Failed to fetch admin JWT token: {req_err}")
+        return
+
+    # Step 3: Fetch list of all rules
+    headers = {
+        'Authorization': f'Bearer {jwt_token}'
+    }
+
+    try:
+        response = requests.get(RULES_LIST_URL, headers=headers)
+        response.raise_for_status()
+
+        rules_list = response.json()
+        if not isinstance(rules_list, list):
+            logger.error(f"Unexpected rules list format: {rules_list}")
+            return
+
+        logger.info(f"Fetched {len(rules_list)} rules successfully.")
+
+    except requests.RequestException as req_err:
+        logger.error(f"Failed to fetch rules list: {req_err}")
+        return
+
+    # Step 4: Fetch each rule's details, modify Authorization, and update
+    for rule in rules_list:
+        rule_id = rule.get("id")
+        if not rule_id:
+            logger.warning(f"Rule entry without ID found: {rule}")
+            continue
+
+        rule_detail_url = RULE_DETAIL_URL_TEMPLATE.format(rule_name=rule_id)
+        rule_update_url = RULE_UPDATE_URL_TEMPLATE.format(rule_name=rule_id)
+
+        try:
+            # Fetch rule details
+            response = requests.get(rule_detail_url, headers=headers)
+            response.raise_for_status()
+            rule_detail = response.json()
+            logger.info(f"Fetched rule detail for '{rule_id}'.")
+
+            # 🔥 Update the Authorization inside actions.rest.headers
+            if "actions" in rule_detail:
+                for action in rule_detail["actions"]:
+                    rest_action = action.get("rest")
+                    if rest_action and "headers" in rest_action:
+                        if "Authorization" in rest_action["headers"]:
+                            rest_action["headers"]["Authorization"] = f"Bearer {jwt_token}"
+                            logger.info(f"Authorization header updated for rule '{rule_id}'.")
+
+            # Update the rule by sending PUT request
+            update_headers = {
                 'Content-Type': 'application/json',
-                'Authorization': f'Bearer {token}'
+                'Authorization': f'Bearer {jwt_token}'
             }
 
-            try:
-                response = requests.get(url, headers=headers)
+            update_response = requests.put(
+                rule_update_url,
+                headers=update_headers,
+                json=rule_detail  # Use modified rule_detail as body
+            )
 
-                if response.status_code == 200:
-                    jwt_token = response.json().get("data", {}).get("token")
-                    if jwt_token:
-                        logger.info(f"JWT token for {username}: {jwt_token}")
-                    else:
-                        logger.warning(f"No token found in response for {username}")
-                else:
-                    logger.error(f"Failed to fetch token for {username}: {response.status_code} {response.text}")
+            if update_response.status_code == 200:
+                logger.info(f"Rule '{rule_id}' updated successfully.")
+            else:
+                logger.error(f"Failed to update rule '{rule_id}': {update_response.status_code} {update_response.text}")
 
-            except requests.RequestException as req_err:
-                logger.error(f"Request error for {username}: {req_err}")
+        except requests.RequestException as req_err:
+            logger.error(f"Failed to fetch or update rule '{rule_id}': {req_err}")
 
-    except Exception as e:
-        logger.error(f"Error reading edgex_users.json: {e}")
 
 
 

@@ -48,7 +48,7 @@ CONTAINER_VAULT = "edgex-security-secretstore-setup"
 VAULT_ROOT_PATH = "/vault/config/assets/resp-init.json"
 
 # base url for user fetcher from honeycomb
-BASE_URL = "http://10.12.82.105:80"
+BASE_URL = "https://iot.meridiandatalabs.com"
 
 # user credentials for honeycomb
 Username = "admin@mdl.com"
