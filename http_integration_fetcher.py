@@ -45,3 +45,25 @@ class HttpIntegration:
         except grpc.RpcError as e:
             logging.error(f"Failed to fetch HTTP integrations: {e.details()}")
             return "No endpoint available", []
+        
+    def update_http_integration(self, application_id, endpoint, headers):
+        """
+        Update the HTTP integration for a given application.
+
+        :param application_id: ID of the application in ChirpStack
+        :param endpoint: New endpoint URL
+        :param headers: New headers for the integration
+        """
+        request = api.UpdateHttpIntegrationRequest(
+            application_id=application_id,
+            integration=api.HttpIntegration(
+                event_endpoint_url=endpoint,
+                headers=headers
+            )
+        )
+
+        try:
+            self.integration_service.UpdateHttpIntegration(request, metadata=self.auth_token)
+            logging.info(f"Updated HTTP integration for application {application_id} successfully.")
+        except grpc.RpcError as e:
+            logging.error(f"Failed to update HTTP integration: {e.details()}")

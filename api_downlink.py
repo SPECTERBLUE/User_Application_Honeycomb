@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException, status, Path
 from fastapi.responses import JSONResponse
 import event_fetcher_parse as efp
+import User_token
+from pydantic import BaseModel
 import json
 import os
 import logging
@@ -14,6 +16,127 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 CONFIG_FILE = "config-api.json"
+JSON_FILE = "edgex_users.json"
+
+class UserRequest(BaseModel):
+    username: str
+
+@app.post("/downlink/get-token")
+def get_token(request: UserRequest):
+    """Return token for a given username from JSON file."""
+
+    if not os.path.exists(JSON_FILE):
+        raise HTTPException(status_code=500, detail="Token store not found.")
+
+    try:
+        with open(JSON_FILE, "r") as f:
+            data = json.load(f)
+
+        for entry in data:
+            if entry.get("username") == request.username:
+                return {"username": request.username, "token": entry.get("token", "")}
+
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading token store: {e}")
+    
+
+@app.get("/downlink/edgex_token_list")
+def get_token_list():
+    """Return all tokens from JSON file."""
+    if not os.path.exists(JSON_FILE):
+        raise HTTPException(status_code=500, detail="Token store not found.")
+
+    try:
+        with open(JSON_FILE, "r") as f:
+            data = json.load(f)
+            return JSONResponse(content=data)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading token store: {e}")
+    
+@app.post("/downlink/edgex_token_list_update")
+def update_token_list(data: dict):
+    """
+    Overwrite the JSON file with new token data.
+
+    This function updates the token list stored in a JSON file. If the file does not exist,
+    an HTTPException is raised. The function expects the input data to be in the following format:
+    
+    {
+        "list": [
+            {
+                "username": "admin",
+                "token": ""
+            },
+            {
+                "username": "user9",
+                "token": ""
+            },
+            {
+                "username": "user1",
+                "token": "1234567"
+            }
+        ]
+    }
+
+    Args:
+        data (dict): A dictionary containing the new token list under the key "list".
+
+    Returns:
+        dict: A dictionary containing the status and a success message if the operation is successful.
+
+    Raises:
+        HTTPException: If the JSON file does not exist or if there is an error writing to the file.
+    """
+    """overwrite the JSON file with new data."""
+    if not os.path.exists(JSON_FILE):
+        raise HTTPException(status_code=500, detail="Token store not found.")
+
+    try:
+        with open(JSON_FILE, "w") as f:
+            formatted_data = data.get("list", [])
+            json.dump(formatted_data, f, indent=4)
+            return {"status": "success", "message": "Token list updated successfully."}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error writing to token store: {e}")
+    
+@app.get("/downlink/honeycomb_user_list")
+def get_honeycomb_user_list():
+   """Returns the list of user after runing update_user_list() function."""
+   try:
+        # Call the function to update the user list
+        User_token.update_user_list()
+        
+        # Read the updated JSON file
+        if os.path.exists(JSON_FILE):
+            with open(JSON_FILE, "r") as f:
+                data = json.load(f)
+                return JSONResponse(content=data)
+        else:
+            raise HTTPException(status_code=500, detail="Token store not found.")
+    
+   except Exception as e:
+       raise HTTPException(status_code=500, detail=f"Error reading token store: {e}") 
+   
+@app.post("/downlink/jwt_rotation", status_code=status.HTTP_200_OK)
+def jwt_rotation():
+    """
+    Endpoint to trigger JWT rotation for all users.
+    """
+    try:
+        User_token.Jwt_rotaion_all()
+        return {
+            "status": "success",
+            "message": "JWT rotation completed successfully."
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error during JWT rotation: {str(e)}"
+        )
 
 @app.post("/downlink/reset-keyrotation", status_code=status.HTTP_200_OK)
 async def resetkeyrotation(data: dict):
@@ -394,7 +517,7 @@ async def generate_password(username: str):
         # Command to create a new EdgeX user with temporary JWT token access
         cmd = (
             f"docker exec {CONTAINERS['edgex']} ./secrets-config proxy adduser "
-            f"--user \"{username}\" --tokenTTL 60 --jwtTTL 119m --useRootToken"
+            f"--user \"{username}\" --tokenTTL 365d --jwtTTL 1d --useRootToken"
         )
         output = subprocess.check_output(cmd, shell=True, text=True).strip()
         parsed_output = json.loads(output)

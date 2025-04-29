@@ -37,8 +37,9 @@
     // validateRange(jsonObj.Value, 0, 100, "Humidity");
     retObj = {
       data: [
-        { bn: "humidity" + dev_eui, n: "_humidity", u: "%RH", v: jsonObj.humidity, timestamp: jsonObj.timestamp },
-        { bn: "humidity" + dev_eui, n: "_temperature", u: "celcius", v: jsonObj.temperature, timestamp: jsonObj.timestamp }
+		{ bn: "humidity" + dev_eui+"_", n: "DeviceName", u: "%RH", vs: "Device70", timestamp: jsonObj.timestamp },
+        { bn: "humidity" + dev_eui+"_", n: "humidity", u: "%RH", v: jsonObj.humidity, timestamp: jsonObj.timestamp },
+        { bn: "humidity" + dev_eui+"_", n: "temperature", u: "celcius", v: jsonObj.temperature, timestamp: jsonObj.timestamp }
       ]
     };
     return retObj;
