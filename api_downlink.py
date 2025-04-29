@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, status, Path
 from fastapi.responses import JSONResponse
 import event_fetcher_parse as efp
+import User_token
 from pydantic import BaseModel
 import json
 import os
@@ -101,7 +102,24 @@ def update_token_list(data: dict):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error writing to token store: {e}")
-
+    
+@app.get("/downlink/honeycomb_user_list")
+def get_honeycomb_user_list():
+   """Returns the list of user after runing update_user_list() function."""
+   try:
+        # Call the function to update the user list
+        User_token.update_user_list()
+        
+        # Read the updated JSON file
+        if os.path.exists(JSON_FILE):
+            with open(JSON_FILE, "r") as f:
+                data = json.load(f)
+                return JSONResponse(content=data)
+        else:
+            raise HTTPException(status_code=500, detail="Token store not found.")
+    
+   except Exception as e:
+       raise HTTPException(status_code=500, detail=f"Error reading token store: {e}") 
 
 @app.post("/downlink/reset-keyrotation", status_code=status.HTTP_200_OK)
 async def resetkeyrotation(data: dict):

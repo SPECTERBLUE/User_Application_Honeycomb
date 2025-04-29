@@ -4,6 +4,7 @@ import json
 import os
 import requests
 
+
 #  Set this to True to remove users not in current API response
 REMOVE_OLD_USERS = True
 
@@ -178,6 +179,15 @@ def JWT_token_generator():
 
         except requests.RequestException as req_err:
             logger.error(f"Failed to fetch or update rule '{rule_id}': {req_err}")
+            
+    def http_integration_auth_rotation():
+        """
+        Fetches HTTP integration details and updates the Authorization header.
+        """
+        # Assuming you have a function to get the gRPC channel and auth token
+        
+        
+        
 
 
 
