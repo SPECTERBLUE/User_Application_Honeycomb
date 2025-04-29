@@ -3,6 +3,7 @@ from User_fetcher import UserFetcher
 import json
 import os
 import requests
+import config
 
 
 #  Set this to True to remove users not in current API response
@@ -175,21 +176,126 @@ def JWT_token_generator():
             if update_response.status_code == 200:
                 logger.info(f"Rule '{rule_id}' updated successfully.")
             else:
-                logger.error(f"Failed to update rule '{rule_id}': {update_response.status_code} {update_response.text}")
-
+                logger.error(f"Failed to update rule '{rule_id}': {update_response.status_code} {update_response.text}") 
+            
+            return jwt_token        
+    
         except requests.RequestException as req_err:
             logger.error(f"Failed to fetch or update rule '{rule_id}': {req_err}")
             
-    def http_integration_auth_rotation():
+            
+def chirpstack_auth_http_rotation(jwt):
         """
         Fetches HTTP integration details and updates the Authorization header.
         """
-        # Assuming you have a function to get the gRPC channel and auth token
+        Chirpstack_tenant_url = "http://10.12.82.105:8090/api/tenants"
+        Chirpstack_application_url = "http://10.12.82.105:8090/api/applications"
+        Chirpstack_http_integration_url = "http://10.12.82.105:8090/api/applications/{application_id}/integrations/http"
+
+        try:
+            parameters = {
+                'limit': 10,
+                'offset': 0
+            }
+            # Fetch tenant details
+            headers = {
+                'Accept': 'application/json',
+                'Grpc-Metadata-Authorization': f'Bearer {config.API_TOKEN}'
+            }
+            response = requests.get(Chirpstack_tenant_url, headers=headers, params=parameters)
+            response.raise_for_status()
+            tenant_details = response.json()
+            logger.info("Fetched ChirpStack tenant details successfully.")
+
+            # Extract tenant ID from the response
+            if "result" in tenant_details and isinstance(tenant_details["result"], list) and tenant_details["result"]:
+                tenant_id = tenant_details["result"][0].get("id")
+                if tenant_id:
+                    logger.info(f"Tenant ID extracted: {tenant_id}")
+                else:
+                    logger.error("Tenant ID not found in the response.")
+            else:
+                logger.error("Unexpected response format or empty result.")
         
+        except requests.RequestException as req_err:
+            logger.error(f"Failed to fetch ChirpStack tenant details: {req_err}")
+            return
         
-        
+        # Get the application list
+        try:
+            parameters = {
+                'limit': 100,
+                'offset': 0,
+                'tenantId': tenant_id
+            }
+
+            # Fetch application details
+            headers = {
+                'Accept': 'application/json',
+                'Grpc-Metadata-Authorization': f'Bearer {config.API_TOKEN}'
+            }
+            response = requests.get(Chirpstack_application_url, headers=headers, params=parameters)
+            response.raise_for_status()
+            application_details = response.json()
+            logger.info("Fetched ChirpStack application details successfully.")
+
+            # Extract all application IDs from the response
+            
+            if "result" in application_details and isinstance(application_details["result"], list):
+                for app in application_details["result"]:
+                    app_id = app.get("id")
+                    logger.info(f"Processing application ID: {app_id}")
+                    try:
+                        # get http integration details
+                        
+                        headers = {
+                            'Accept': 'application/json',
+                            'Grpc-Metadata-Authorization': f'Bearer {config.API_TOKEN}'
+                        }
+                        
+                        response = requests.get(Chirpstack_http_integration_url.format(application_id=app_id), headers=headers)
+                        response.raise_for_status()
+                        http_integration_details = response.json()
+                        
+                        logger.info(f"Fetched HTTP integration details for application ID: {app_id}")
+                        
+                       
+                        if "headers" in http_integration_details.get("integration", {}):
+                            http_integration_details["integration"]["headers"]["Authorization-1"] = f"Bearer {jwt}"
+                            logger.info(f"Authorization-1 header updated for application ID: {app_id}")
+                            response = requests.put(
+                                Chirpstack_http_integration_url.format(application_id=app_id),
+                                headers=headers,
+                                json=http_integration_details
+                            )
+                            if response.status_code == 200:
+                                logger.info(f"HTTP integration updated successfully for application ID: {app_id}")
+                            else:
+                                logger.error(f"Failed to update HTTP integration for application ID {app_id}: {response.status_code} - {response.text}")
+                    
+                    except requests.RequestException as req_err:
+                        logger.error(f"Failed to fetch or update HTTP integration for application ID {app_id}: {req_err}")
+                        
+                    
+            else:
+                logger.error("Unexpected response format or empty result.")
+
+            logger.info(f"Total Application IDs extracted: {len(application_details['result'])}")
+
+        except requests.RequestException as req_err:
+            logger.error(f"Failed to fetch ChirpStack application details: {req_err}")
 
 
+def Jwt_rotaion_all():
+    """
+    Fetches all JWT tokens and updates the Authorization header.
+    """
+    # Run the user updater
+    update_user_list()
+    
+    jwt = JWT_token_generator()
+    
+    chirpstack_auth_http_rotation(jwt)
 
 
 
@@ -198,4 +304,6 @@ if __name__ == "__main__":
     # Run the user updater
     update_user_list()
     
-    JWT_token_generator()
+    jwt = JWT_token_generator()
+    
+    chirpstack_auth_http_rotation(jwt)

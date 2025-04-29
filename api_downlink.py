@@ -120,6 +120,23 @@ def get_honeycomb_user_list():
     
    except Exception as e:
        raise HTTPException(status_code=500, detail=f"Error reading token store: {e}") 
+   
+@app.post("/downlink/jwt_rotation", status_code=status.HTTP_200_OK)
+def jwt_rotation():
+    """
+    Endpoint to trigger JWT rotation for all users.
+    """
+    try:
+        User_token.Jwt_rotaion_all()
+        return {
+            "status": "success",
+            "message": "JWT rotation completed successfully."
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error during JWT rotation: {str(e)}"
+        )
 
 @app.post("/downlink/reset-keyrotation", status_code=status.HTTP_200_OK)
 async def resetkeyrotation(data: dict):
@@ -500,7 +517,7 @@ async def generate_password(username: str):
         # Command to create a new EdgeX user with temporary JWT token access
         cmd = (
             f"docker exec {CONTAINERS['edgex']} ./secrets-config proxy adduser "
-            f"--user \"{username}\" --tokenTTL 60 --jwtTTL 119m --useRootToken"
+            f"--user \"{username}\" --tokenTTL 365d --jwtTTL 1d --useRootToken"
         )
         output = subprocess.check_output(cmd, shell=True, text=True).strip()
         parsed_output = json.loads(output)
