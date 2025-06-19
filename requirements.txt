@@ -7,6 +7,8 @@ charset-normalizer==3.4.1
 chirpstack-api==4.11.0
 click==8.1.8
 cryptography==44.0.0
+dnspython==2.7.0
+email_validator==2.2.0
 exceptiongroup==1.2.2
 fastapi==0.115.12
 google-api-core==2.24.1
