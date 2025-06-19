@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, status, Path
 from fastapi.responses import JSONResponse
 import event_fetcher_parse as efp
 import User_token
-from pydantic import BaseModel
+from pydantic import BaseModel,EmailStr
 import json
 import os
 import logging
@@ -629,4 +629,105 @@ def get_tokens():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal Server Error: " + str(e)
+        )
+
+''' This section is for creating a new user in Apache Superset using Docker exec.
+   It uses the Superset CLI to create a user with specified attributes. '''
+
+
+# Custom exception to represent user conflict (already exists)
+class ConflictError(Exception):
+    pass
+
+# Request model for user creation
+class UserCreate(BaseModel):
+    username: str
+    first_name: str = "N/A"
+    last_name: str = "N/A"
+    email: EmailStr
+    password: str
+    role: str = "Admin"
+
+@app.post("/downlink/create_superset_user", status_code=status.HTTP_200_OK)
+async def create_superset_user(user: UserCreate):
+    try:
+        # 400 Bad Request: Missing required input fields
+        if not user.username or not user.email or not user.password:
+            raise ValueError("Username, email, and password are required.")
+
+        #  Docker Command Explanation:
+        # Executes the superset fab create-user command inside the running Superset container.
+        # This uses Docker CLI to run the Superset CLI tool and create a user.
+        # The container must be named 'superset_app', and Superset must be installed within it.
+        command = [
+            "docker", "exec", "superset_app",  # Docker exec on running container 'superset_app'
+            "superset", "fab", "create-user",  # Superset CLI user creation
+            "--username", user.username,
+            "--firstname", user.first_name,
+            "--lastname", user.last_name,
+            "--email", user.email,
+            "--password", user.password,
+            "--role", user.role
+        ]
+
+        # Run the command and capture both stdout and stderr
+        result = subprocess.run(command, capture_output=True, text=True)
+        stdout = result.stdout.strip().lower()
+        stderr = result.stderr.strip().lower()
+
+
+        # 404 Not Found: Docker container doesn't exist or command isn't found
+        if "no such container" in stderr or "not found" in stderr:
+            raise FileNotFoundError("Superset container or command not found.")
+
+        # 409 Conflict: Superset CLI indicates the user already exists
+        if "already exists" in stdout or "already exists" in stderr:
+            raise ConflictError(f"User with email '{user.email}' already exists.")
+
+        # 500 Internal Server Error: General failure in command execution
+        if result.returncode != 0:
+            raise RuntimeError(f"Docker command failed.\nSTDOUT: {stdout}\nSTDERR: {stderr}")
+
+        # 200 OK: Success — user created
+        return {
+            "status": "success",
+            "code": 200,
+            "message": f"User '{user.username}' created successfully.",
+            "stdout": result.stdout.strip()
+        }
+
+    # 400: Missing required fields or bad input
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+
+    # 403: Not expected here, but reserved for permission-related issues
+    except PermissionError as pe:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+
+    # 404: Docker container or command missing
+    except FileNotFoundError as fnfe:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(fnfe)
+        )
+
+    # 409: User already exists
+    except ConflictError as ce:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(ce)
+        )
+        
+    # 500: Docker failure or conatiner doent exist
+    except RuntimeError as re:
+        clean_msg = str(re).replace('\n', ' ')
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + clean_msg
         )
