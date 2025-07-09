@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 CONFIG_FILE = "config-api.json"
 JSON_FILE = "edgex_users.json"
+SUPERSET_CONTAINER = "superset_app"
 
 class UserRequest(BaseModel):
     username: str
@@ -745,6 +746,11 @@ async def change_password(body: PasswordChangeRequest):
         raise HTTPException(
             status_code=400,
             detail="New password and confirm password do not match."
+        )
+    if body.old_password == body.new_password:
+        raise HTTPException(
+            status_code=400,
+            detail="New password cannot be the same as the old password."
         )
 
     # Single-line script string (escape quotes, use \n for new lines)
