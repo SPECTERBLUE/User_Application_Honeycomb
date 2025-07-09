@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 CONFIG_FILE = "config-api.json"
 JSON_FILE = "edgex_users.json"
+SUPERSET_CONTAINER = "superset_app"
 
 class UserRequest(BaseModel):
     username: str
@@ -731,3 +732,78 @@ async def create_superset_user(user: UserCreate):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal Server Error: " + clean_msg
         )
+        
+
+class PasswordChangeRequest(BaseModel):
+    username: str
+    old_password: str
+    new_password: str
+    confirm_password: str
+
+@app.post("/downlink/change_password", status_code=status.HTTP_200_OK)
+async def change_password(body: PasswordChangeRequest):
+    if body.new_password != body.confirm_password:
+        raise HTTPException(
+            status_code=400,
+            detail="New password and confirm password do not match."
+        )
+    if body.old_password == body.new_password:
+        raise HTTPException(
+            status_code=400,
+            detail="New password cannot be the same as the old password."
+        )
+
+    # Single-line script string (escape quotes, use \n for new lines)
+    superset_password_change = (
+    "from superset import create_app\n"
+    "from superset.extensions import db, security_manager\n"
+    "from werkzeug.security import check_password_hash\n"
+    "app = create_app()\n"
+    "with app.app_context():\n"
+    f" user = security_manager.get_user_by_username('{body.username}')\n"
+    f" if not user or not check_password_hash(user.password, '{body.old_password}'):\n"
+    "  print('Old password is incorrect')\n"
+    " else:\n"
+    f"  security_manager.reset_password(user.id, '{body.new_password}')\n"
+    "  db.session.commit()\n"
+    "  print('Password updated')"
+)
+
+    try:
+        result = subprocess.run(
+            ["docker", "exec", SUPERSET_CONTAINER, "python3", "-c", superset_password_change],
+            capture_output=True,
+            text=True
+        )
+    except subprocess.CalledProcessError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Docker container '{SUPERSET_CONTAINER}' not found or failed to exec command."
+        )
+
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail="Docker exec error: " + result.stderr.strip().replace('\n', ' ')
+        )
+
+    output = result.stdout.strip()
+
+    if "password updated" in output.lower():
+        return {
+            "status": "success",
+            "code": 200,
+            "message": f"Password updated for '{body.username}'.",
+            "stdout": output
+        }
+
+    elif "old password is incorrect" in output.lower():
+        raise HTTPException(
+            status_code=401,
+            detail="Old password is incorrect."
+        )
+
+    raise HTTPException(
+        status_code=500,
+        detail="Unexpected output: " + output
+    )
