@@ -733,43 +733,47 @@ async def create_superset_user(user: UserCreate):
             detail="Internal Server Error: " + clean_msg
         )
         
-
+# Pydantic model for request body
 class PasswordChangeRequest(BaseModel):
-    username: str
+    email: str
     old_password: str
     new_password: str
     confirm_password: str
 
 @app.post("/downlink/change_password", status_code=status.HTTP_200_OK)
 async def change_password(body: PasswordChangeRequest):
+    # Check if new and confirm password match
     if body.new_password != body.confirm_password:
         raise HTTPException(
             status_code=400,
             detail="New password and confirm password do not match."
         )
+
+    # Prevent setting same password again
     if body.old_password == body.new_password:
         raise HTTPException(
             status_code=400,
             detail="New password cannot be the same as the old password."
         )
 
-    # Single-line script string (escape quotes, use \n for new lines)
+    # Python code to run inside the Superset container
     superset_password_change = (
-    "from superset import create_app\n"
-    "from superset.extensions import db, security_manager\n"
-    "from werkzeug.security import check_password_hash\n"
-    "app = create_app()\n"
-    "with app.app_context():\n"
-    f" user = security_manager.get_user_by_username('{body.username}')\n"
-    f" if not user or not check_password_hash(user.password, '{body.old_password}'):\n"
-    "  print('Old password is incorrect')\n"
-    " else:\n"
-    f"  security_manager.reset_password(user.id, '{body.new_password}')\n"
-    "  db.session.commit()\n"
-    "  print('Password updated')"
-)
+        "from superset import create_app\n"
+        "from superset.extensions import db, security_manager\n"
+        "from werkzeug.security import check_password_hash\n"
+        "app = create_app()\n"
+        "with app.app_context():\n"
+        f" user = security_manager.find_user(email='{body.email}')\n"  # Lookup by email
+        f" if not user or not check_password_hash(user.password, '{body.old_password}'):\n"
+        "  print('Old password is incorrect')\n"
+        " else:\n"
+        f"  security_manager.reset_password(user.id, '{body.new_password}')\n"
+        "  db.session.commit()\n"
+        "  print('Password updated')"
+    )
 
     try:
+        # Run the Python script in the Superset Docker container
         result = subprocess.run(
             ["docker", "exec", SUPERSET_CONTAINER, "python3", "-c", superset_password_change],
             capture_output=True,
@@ -781,6 +785,7 @@ async def change_password(body: PasswordChangeRequest):
             detail=f"Docker container '{SUPERSET_CONTAINER}' not found or failed to exec command."
         )
 
+    # If script fails inside container
     if result.returncode != 0:
         raise HTTPException(
             status_code=500,
@@ -789,20 +794,23 @@ async def change_password(body: PasswordChangeRequest):
 
     output = result.stdout.strip()
 
+    # Successful update
     if "password updated" in output.lower():
         return {
             "status": "success",
             "code": 200,
-            "message": f"Password updated for '{body.username}'.",
+            "message": f"Password updated for '{body.email}'.",
             "stdout": output
         }
 
+    # Password verification failed
     elif "old password is incorrect" in output.lower():
         raise HTTPException(
             status_code=401,
             detail="Old password is incorrect."
         )
 
+    # Fallback for unhandled cases
     raise HTTPException(
         status_code=500,
         detail="Unexpected output: " + output
