@@ -518,7 +518,7 @@ async def generate_password(username: str):
         # Command to create a new EdgeX user with temporary JWT token access
         cmd = (
             f"docker exec {CONTAINERS['edgex']} ./secrets-config proxy adduser "
-            f"--user \"{username}\" --tokenTTL 365d --jwtTTL 1d --useRootToken"
+            f"--user \"{username}\" --tokenTTL 3650d --jwtTTL 1d --useRootToken"
         )
         output = subprocess.check_output(cmd, shell=True, text=True).strip()
         parsed_output = json.loads(output)
