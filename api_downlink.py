@@ -1,14 +1,23 @@
-from fastapi import FastAPI, HTTPException, status, Path
+from fastapi import FastAPI, HTTPException, status, Path, Request
 from fastapi.responses import JSONResponse
 import event_fetcher_parse as efp
 import User_token
-from pydantic import BaseModel,EmailStr
+from pydantic import BaseModel, Field, field_validator, EmailStr
+from pydantic import FieldValidationInfo
+from fastapi.exceptions import RequestValidationError
 import json
 import os
 import logging
 import subprocess
 import config
 import re
+import uuid
+from captcha_utils import (
+    redis_client,
+    generate_captcha_text,
+    encrypt_aes_gcm,
+    decrypt_aes_gcm
+)
 
 # Configure logging
 logging.basicConfig(level=logging.ERROR)
@@ -478,62 +487,67 @@ ROOT_FILE_PATH = config.VAULT_ROOT_PATH
 
 # === FastAPI Endpoints ===
 
-def run_command(command: str) -> dict:
-    """
-    Executes a shell command and returns its output.
-    If it fails, raises an appropriate HTTP exception.
-    """
-    try:
-        result = subprocess.run(command, shell=True, text=True, capture_output=True)
-        if result.returncode != 0:
-            logging.error(f"Command Error: {result.stderr}")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Docker command failed: {result.stderr}"
-            )
-        return {"output": result.stdout.strip()}
-    except HTTPException as he:
-        raise he
-    except PermissionError as pe:
-        # Handle insufficient system permissions
+# Regex pattern for validating username
+SAFE_USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9](?:[a-zA-Z0-9_-]*[a-zA-Z0-9])?$")
+
+class UserRequest(BaseModel):
+    username: str
+
+def validate_username(username: str):
+    if '\x00' in username:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(pe)
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Null byte in username is not allowed."
         )
-    except Exception as e:
-        # Catch-all for unexpected errors
+    if not SAFE_USERNAME_PATTERN.fullmatch(username):
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal Server Error: " + str(e)
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid username format. Only letters, digits, '-', '_' are allowed."
         )
 
+@app.post(
+    "/downlink/generate-password",
+    summary="Generate EdgeX Password",
+    description="Generates a password for EdgeX.",
+    response_description="The generated password for the user"
+)
+async def generate_password(user_req: UserRequest):
+    username = user_req.username
+    validate_username(username)
 
-@app.get("/downlink/generate-password/{username}", summary="Generate EdgeX Password", description="Generates a password for EdgeX.")
-async def generate_password(username: str):
-    """
-    Creates a new EdgeX user with a password using Docker exec.
-    """
     try:
-        logging.info(f"Generating password for: {username}")
-        # Command to create a new EdgeX user with temporary JWT token access
-        cmd = (
-            f"docker exec {CONTAINERS['edgex']} ./secrets-config proxy adduser "
-            f"--user \"{username}\" --tokenTTL 3650d --jwtTTL 1d --useRootToken"
-        )
-        output = subprocess.check_output(cmd, shell=True, text=True).strip()
+
+        # Secure, parameterized Docker command
+        cmd = [
+            "docker", "exec", CONTAINERS["edgex"],
+            "./secrets-config", "proxy", "adduser",
+            "--user", username,
+            "--tokenTTL", "3650d",
+            "--jwtTTL", "1d",
+            "--useRootToken"
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        output = result.stdout.strip()
+
         parsed_output = json.loads(output)
 
-        # Return password from the Docker command output
         return {
             "status": "success",
             "message": "User password generated successfully",
             "password": parsed_output.get("password", "No password found")
         }
-    except ValueError as ve:
-        # Handle malformed JSON or command output
+
+    except json.JSONDecodeError as je:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
+            detail="Failed to parse Docker output: {output}"
+        )
+        
+    except subprocess.CalledProcessError as cpe:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Docker command failed: {cpe}"
         )
     except PermissionError as pe:
         raise HTTPException(
@@ -546,8 +560,7 @@ async def generate_password(username: str):
             detail="Internal Server Error: " + str(e)
         )
 
-
-@app.get("/downlink/create-chirpstack-api-key/{name}", summary="Create ChirpStack API Key", description="Creates an API key in ChirpStack.")
+@app.post("/downlink/create-chirpstack-api-key/{name}", summary="Create ChirpStack API Key", description="Creates an API key in ChirpStack.")
 async def create_api_key(name: str = Path(..., min_length=1, description="API key name")):
     """
     Uses the ChirpStack CLI inside the container to generate an API key.
@@ -562,15 +575,20 @@ async def create_api_key(name: str = Path(..., min_length=1, description="API ke
 
         logging.info(f"Creating ChirpStack API key for: {name}")
 
-        # ChirpStack CLI command to create a new API key with the given name
-        cmd = (
-            f"docker exec {CONTAINERS['chirpstack']} "
-            f"chirpstack --config /etc/chirpstack "
-            f"create-api-key --name '{name}'"
-        )
-        output = subprocess.check_output(cmd, shell=True, text=True).strip()
+        # Parameterized Docker command (safe)
+        cmd = [
+            "docker", "exec",
+            CONTAINERS["chirpstack"],
+            "chirpstack",
+            "--config", "/etc/chirpstack",
+            "create-api-key",
+            "--name", name
+        ]
 
-        # Extract the token from command output using regex
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        output = result.stdout.strip()
+
+        # Extract the token from command output
         match = re.search(r'token: (\S+)', output)
         token = match.group(1) if match else "No API key found"
 
@@ -579,15 +597,11 @@ async def create_api_key(name: str = Path(..., min_length=1, description="API ke
             "message": "API key created successfully",
             "api_key": token
         }
-    except ValueError as ve:
+
+    except subprocess.CalledProcessError as e:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
-        )
-    except PermissionError as pe:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=str(pe)
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create API key: {e.stderr.strip()}"
         )
     except Exception as e:
         raise HTTPException(
@@ -595,31 +609,41 @@ async def create_api_key(name: str = Path(..., min_length=1, description="API ke
             detail="Internal Server Error: " + str(e)
         )
 
-
 @app.get("/downlink/tokens", summary="Get Root Token", description="Extracts the last root token and returns it as JSON.")
 def get_tokens():
     """
     Reads the root token from the Vault response JSON file inside the container.
     """
     try:
-        logging.info("Extracting root token...")
-        # Command to read the root token file using Docker
-        cmd = f"docker exec {CONTAINERS['root']} cat {ROOT_FILE_PATH}"
-        output = subprocess.check_output(cmd, shell=True, text=True).strip()
 
-        # Parse the JSON output to extract the root token
+        # Parameterized docker exec command as list
+        cmd = ["docker", "exec", CONTAINERS["root"], "cat", ROOT_FILE_PATH]
+
+        output = subprocess.check_output(cmd, text=True).strip()
+
         parsed_output = json.loads(output)
-        root_token = parsed_output.get("root_token", "No root token found")
+        root_token = parsed_output.get("root_token")
+        if not root_token:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Root token not found in the JSON file."
+            )
 
         return {
             "status": "success",
             "message": "Root token retrieved successfully",
             "root_token": root_token
         }
-    except ValueError as ve:
+
+    except json.JSONDecodeError as je:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
+            detail="Failed to parse JSON from Vault response."
+        )
+    except subprocess.CalledProcessError as cpe:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Docker command failed: {cpe}"
         )
     except PermissionError as pe:
         raise HTTPException(
@@ -635,34 +659,101 @@ def get_tokens():
 ''' This section is for creating a new user in Apache Superset using Docker exec.
    It uses the Superset CLI to create a user with specified attributes. '''
 
-
-# Custom exception to represent user conflict (already exists)
 class ConflictError(Exception):
     pass
 
-# Request model for user creation
+
 class UserCreate(BaseModel):
-    username: str
-    first_name: str = "N/A"
-    last_name: str = "N/A"
-    email: EmailStr
-    password: str
-    role: str = "Admin"
+    username: str = Field(..., example="string")
+    first_name: str = Field("", example="string")
+    last_name: str = Field("", example="string")
+    email: str = Field(..., example="string")   
+    password: str = Field(..., example="string")
+    role: str = Field(..., example="Admin")
+
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        email_regex = re.compile(
+            r'^[a-zA-Z0-9]+([._-][a-zA-Z0-9]+)*@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        )
+        if not email_regex.match(v):
+            raise ValueError("Invalid email format")
+        return v
+
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v: str, info: FieldValidationInfo) -> str:
+        values = info.data
+        email = values.get('email', '').lower()
+        password = v.lower()
+
+        # Identity restriction for @gmail.com
+        if email.endswith('@gmail.com'):
+            local_part = email.split('@')[0]
+
+            if any(sep in local_part for sep in ['.', '-', '_']):
+                parts = re.split(r'[._-]', local_part)
+                for part in parts:
+                    if part and part in password:
+                        raise ValueError(
+                            f"Password must not contain parts of your email address: '{part}'"
+                        )
+            else:
+                if local_part in password:
+                    raise ValueError(
+                        f"Password must not contain the email local part: '{local_part}'"
+                    )
+
+        # Password strength checks
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters long')
+
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('Password must contain at least one uppercase letter')
+
+        if not re.search(r'[a-z]', v):
+            raise ValueError('Password must contain at least one lowercase letter')
+
+        if not re.search(r'\d', v):
+            raise ValueError('Password must contain at least one digit')
+
+        if not re.search(r'\W', v):
+            raise ValueError('Password must contain at least one special character')
+
+        return v
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
+    error_messages = []
+
+    for error in errors:
+        loc = " -> ".join(str(i) for i in error['loc'] if i != 'body')
+        msg = error['msg']
+        error_messages.append(f"{loc}: {msg}")
+
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "status": "error",
+            "code": 400,
+            "detail": "Validation Failed",
+            "errors": error_messages
+        }
+    )
+
 
 @app.post("/downlink/create_superset_user", status_code=status.HTTP_200_OK)
 async def create_superset_user(user: UserCreate):
     try:
-        # 400 Bad Request: Missing required input fields
         if not user.username or not user.email or not user.password:
             raise ValueError("Username, email, and password are required.")
 
-        #  Docker Command Explanation:
-        # Executes the superset fab create-user command inside the running Superset container.
-        # This uses Docker CLI to run the Superset CLI tool and create a user.
-        # The container must be named 'superset_app', and Superset must be installed within it.
-        command = [
-            "docker", "exec", "superset_app",  # Docker exec on running container 'superset_app'
-            "superset", "fab", "create-user",  # Superset CLI user creation
+        docker_command = [
+            "docker", "exec", SUPERSET_CONTAINER,
+            "superset", "fab", "create-user",
             "--username", user.username,
             "--firstname", user.first_name,
             "--lastname", user.last_name,
@@ -671,25 +762,21 @@ async def create_superset_user(user: UserCreate):
             "--role", user.role
         ]
 
-        # Run the command and capture both stdout and stderr
-        result = subprocess.run(command, capture_output=True, text=True)
+        result = subprocess.run(docker_command, capture_output=True, text=True)
         stdout = result.stdout.strip().lower()
         stderr = result.stderr.strip().lower()
 
-
-        # 404 Not Found: Docker container doesn't exist or command isn't found
         if "no such container" in stderr or "not found" in stderr:
             raise FileNotFoundError("Superset container or command not found.")
 
-        # 409 Conflict: Superset CLI indicates the user already exists
         if "already exists" in stdout or "already exists" in stderr:
             raise ConflictError(f"User with email '{user.email}' already exists.")
 
-        # 500 Internal Server Error: General failure in command execution
         if result.returncode != 0:
-            raise RuntimeError(f"Docker command failed.\nSTDOUT: {stdout}\nSTDERR: {stderr}")
+            raise RuntimeError(
+                f"Docker command failed.\nSTDOUT: {stdout}\nSTDERR: {stderr}"
+            )
 
-        # 200 OK: Success — user created
         return {
             "status": "success",
             "code": 200,
@@ -697,87 +784,124 @@ async def create_superset_user(user: UserCreate):
             "stdout": result.stdout.strip()
         }
 
-    # 400: Missing required fields or bad input
-    except ValueError as ve:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
-        )
-
-    # 403: Not expected here, but reserved for permission-related issues
     except PermissionError as pe:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(pe)
         )
 
-    # 404: Docker container or command missing
     except FileNotFoundError as fnfe:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(fnfe)
         )
 
-    # 409: User already exists
     except ConflictError as ce:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(ce)
         )
-        
-    # 500: Docker failure or conatiner doent exist
-    except RuntimeError as re:
-        clean_msg = str(re).replace('\n', ' ')
+
+    except RuntimeError as re_err:
+        clean_msg = str(re_err).replace('\n', ' ')
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal Server Error: " + clean_msg
         )
-        
-# Pydantic model for request body
+
+
 class PasswordChangeRequest(BaseModel):
-    email: str
-    old_password: str
-    new_password: str
+    email: EmailStr
+    old_password: str 
+    new_password: str 
     confirm_password: str
+
 
 @app.post("/downlink/change_password", status_code=status.HTTP_200_OK)
 async def change_password(body: PasswordChangeRequest):
-    # Check if new and confirm password match
+    # 1. Password pattern: At least 8 chars, one uppercase, one lowercase, one digit, one special char
+    password_pattern = re.compile(
+        r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)"
+        r"(?=.*[!@#$%^&*()_\-+=\[{\]};:'\",<.>/?\\|`~]).{8,}$"
+    )
+    if not password_pattern.match(body.new_password):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 8 characters long, "
+                   "contain at least one uppercase letter, one lowercase letter, "
+                   "one digit, and one special character."
+        )
+
+    # 2. Confirm new_password and confirm_password match
     if body.new_password != body.confirm_password:
         raise HTTPException(
             status_code=400,
             detail="New password and confirm password do not match."
         )
 
-    # Prevent setting same password again
+    # 3. Prevent reusing the old password
     if body.old_password == body.new_password:
         raise HTTPException(
             status_code=400,
             detail="New password cannot be the same as the old password."
         )
 
-    # Python code to run inside the Superset container
-    superset_password_change = (
-        "from superset import create_app\n"
-        "from superset.extensions import db, security_manager\n"
-        "from werkzeug.security import check_password_hash\n"
-        "app = create_app()\n"
-        "with app.app_context():\n"
-        f" user = security_manager.find_user(email='{body.email}')\n"  # Lookup by email
-        f" if not user or not check_password_hash(user.password, '{body.old_password}'):\n"
-        "  print('Old password is incorrect')\n"
-        " else:\n"
-        f"  security_manager.reset_password(user.id, '{body.new_password}')\n"
-        "  db.session.commit()\n"
-        "  print('Password updated')"
-    )
+    # 4. Gmail-specific logic: Reject if new password contains local part or any split parts
+    email = body.email.lower()
+    new_password_lower = body.new_password.lower()
+
+    if email.endswith("@gmail.com"):
+        local_part = email.split("@")[0]
+
+        # Full local part not allowed in password
+        if local_part in new_password_lower:
+            raise HTTPException(
+                status_code=400,
+                detail="Password cannot contain your emal username."
+            )
+
+        # If contains '.', '_', or '-', check individual parts
+        if any(sep in local_part for sep in ['.', '_', '-']):
+            parts = re.split(r"[._-]", local_part)
+            for part in parts:
+                if part and part in new_password_lower:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Password cannot contain parts of your email address: '{part}'"
+                    )
+
+    # 5. Docker command to change Superset user password
+    superset_password_change_script = """
+from superset import create_app
+from superset.extensions import db, security_manager
+from werkzeug.security import check_password_hash
+import sys
+
+email = sys.argv[1]
+old_password = sys.argv[2]
+new_password = sys.argv[3]
+
+app = create_app()
+with app.app_context():
+    user = security_manager.find_user(email=email)
+    if not user or not check_password_hash(user.password, old_password):
+        print('Old password is incorrect')
+        sys.exit(1)
+    security_manager.reset_password(user.id, new_password)
+    db.session.commit()
+    print('Password updated')
+"""
 
     try:
-        # Run the Python script in the Superset Docker container
         result = subprocess.run(
-            ["docker", "exec", SUPERSET_CONTAINER, "python3", "-c", superset_password_change],
+            [
+                "docker", "exec", SUPERSET_CONTAINER,
+                "python3", "-c", superset_password_change_script,
+                body.email, body.old_password, body.new_password
+            ],
             capture_output=True,
-            text=True
+            text=True,
+            check=False,
         )
     except subprocess.CalledProcessError:
         raise HTTPException(
@@ -785,16 +909,16 @@ async def change_password(body: PasswordChangeRequest):
             detail=f"Docker container '{SUPERSET_CONTAINER}' not found or failed to exec command."
         )
 
-    # If script fails inside container
     if result.returncode != 0:
+        if "old password is incorrect" in result.stdout.lower():
+            raise HTTPException(status_code=401, detail="Old password is incorrect.")
         raise HTTPException(
             status_code=500,
-            detail="Docker exec error: " + result.stderr.strip().replace('\n', ' ')
+            detail="Docker exec error: " + (result.stderr.strip() or result.stdout.strip())
         )
 
     output = result.stdout.strip()
 
-    # Successful update
     if "password updated" in output.lower():
         return {
             "status": "success",
@@ -803,15 +927,110 @@ async def change_password(body: PasswordChangeRequest):
             "stdout": output
         }
 
-    # Password verification failed
-    elif "old password is incorrect" in output.lower():
-        raise HTTPException(
-            status_code=401,
-            detail="Old password is incorrect."
-        )
-
-    # Fallback for unhandled cases
     raise HTTPException(
         status_code=500,
         detail="Unexpected output: " + output
     )
+class CaptchaVerifyRequest(BaseModel):
+    captcha_id: str
+    encrypted_input: dict  # { "iv": ..., "ciphertext": ..., "tag": ... }
+    
+@app.post("/downlink/captcha")
+
+async def generate_captcha():
+    try:
+        captcha_text = generate_captcha_text()
+        captcha_id = str(uuid.uuid4())
+
+        # Save captcha in Redis (expires in 5 minutes)
+        await redis_client.setex(captcha_id, 300, captcha_text)
+        logger.info(f"Generated CAPTCHA: id={captcha_id}")
+        # Encrypt captcha
+        encrypted = encrypt_aes_gcm(captcha_text)
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "ok",
+                "message": "Captcha generated successfully",
+                "captcha_id": captcha_id,
+                "encrypted_captcha": encrypted
+            }
+        )
+
+    except ValueError as ve:
+        logger.warning(f"ValueError during CAPTCHA generation: {ve}")
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "detail": str(ve)}
+        )
+
+    except PermissionError as pe:
+        logger.warning(f"PermissionError during CAPTCHA generation: {pe}")
+        return JSONResponse(
+            status_code=403,
+            content={"status": "error", "detail": str(pe)}
+        )
+
+    except Exception as e:
+        logger.error(f"Unexpected error during CAPTCHA generation: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "detail": "Internal Server Error: " + str(e)}
+        )
+
+# ---------------------------
+# Verify Captcha Endpoint
+# ---------------------------
+@app.post("/downlink/captcha/verify")
+async def verify_captcha(request: CaptchaVerifyRequest):
+    try:
+        stored_captcha = await redis_client.get(request.captcha_id)
+        if not stored_captcha:
+            logger.info(f"Captcha expired or invalid: id={request.captcha_id}")
+            raise ValueError("Captcha expired or invalid")
+
+        decrypted_input = decrypt_aes_gcm(request.encrypted_input)
+
+        if not decrypted_input or stored_captcha != decrypted_input:
+    # Generate new captcha if mismatch or null input
+            new_captcha = generate_captcha_text()
+            await redis_client.setex(request.captcha_id, 300, new_captcha)
+            encrypted_new = encrypt_aes_gcm(new_captcha)
+            logger.info(f"Captcha mismatch or null input for id={request.captcha_id}. New captcha generated.")
+
+            return JSONResponse(
+            status_code=400,  
+            content={
+                "status": "error",
+                "message": "Captcha mismatch or null input. New captcha generated.",
+                "captcha_id": request.captcha_id,
+                "encrypted_captcha": encrypted_new
+            }
+        )
+
+        # Success: delete captcha from Redis
+        await redis_client.delete(request.captcha_id)
+        logger.info(f"Captcha verified successfully: id={request.captcha_id}")
+        return {"status": "ok", "message": "Captcha verified successfully"}
+
+    except ValueError as ve:
+        logger.warning(f"Captcha verification failed: {ve}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except PermissionError as pe:
+        logger.warning(f"Permission error during captcha verification: {pe}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Unexpected error during captcha verification: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
