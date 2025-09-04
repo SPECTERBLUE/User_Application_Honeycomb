@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------
 redis_client = redis.Redis(
     host="localhost",
-    port=6379,
+    port=6389,
     decode_responses=True
 )
 
