@@ -23,7 +23,11 @@ from captcha_utils import (
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+app = FastAPI(
+    docs_url=None,      # Disables Swagger UI (/docs)
+    redoc_url=None,     # Disables ReDoc (/redoc)
+    openapi_url=None    # Disables OpenAPI schema (/openapi.json)
+)
 CONFIG_FILE = "config-api.json"
 JSON_FILE = "edgex_users.json"
 SUPERSET_CONTAINER = "superset_app"
