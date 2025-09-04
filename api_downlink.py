@@ -11,6 +11,14 @@ import logging
 import subprocess
 import config
 import re
+import uuid
+from captcha_utils import (
+    redis_client,
+    generate_captcha_text,
+    encrypt_aes_gcm,
+    decrypt_aes_gcm,
+    CaptchaVerifyRequest
+)
 
 # Configure logging
 logging.basicConfig(level=logging.ERROR)
@@ -924,3 +932,87 @@ with app.app_context():
         status_code=500,
         detail="Unexpected output: " + output
     )
+
+@app.post("/downlink/captcha")
+
+async def generate_captcha():
+    try:
+        captcha_text = generate_captcha_text()
+        captcha_id = str(uuid.uuid4())
+
+        # Save captcha in Redis (expires in 5 minutes)
+        await redis_client.setex(captcha_id, 300, captcha_text)
+
+        # Encrypt captcha
+        encrypted = encrypt_aes_gcm(captcha_text)
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "ok",
+                "message": "Captcha generated successfully",
+                "captcha_id": captcha_id,
+                "encrypted_captcha": encrypted
+            }
+        )
+
+    except ValueError as ve:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "detail": str(ve)}
+        )
+
+    except PermissionError as pe:
+        return JSONResponse(
+            status_code=403,
+            content={"status": "error", "detail": str(pe)}
+        )
+
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "detail": "Internal Server Error: " + str(e)}
+        )
+   
+# Verify Captcha Endpoint
+
+@app.post("/downlink/captcha/verify")
+async def verify_captcha(request: CaptchaVerifyRequest):
+    try:
+        stored_captcha = await redis_client.get(request.captcha_id)
+        if not stored_captcha:
+            raise ValueError("Captcha expired or invalid")
+
+        decrypted_input = decrypt_aes_gcm(request.encrypted_input)
+
+        if stored_captcha != decrypted_input:
+            new_captcha = generate_captcha_text()
+            await redis_client.setex(request.captcha_id, 300, new_captcha)
+            encrypted_new = encrypt_aes_gcm(new_captcha)
+            return {
+                "status": "error",
+                "message": "Captcha mismatch. New captcha generated.",
+                "captcha_id": request.captcha_id,
+                "encrypted_captcha": encrypted_new
+            }
+
+        await redis_client.delete(request.captcha_id)
+        return {"status": "ok", "message": "Captcha verified successfully"}
+
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except PermissionError as pe:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(pe)
+        )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: " + str(e)
+        )
