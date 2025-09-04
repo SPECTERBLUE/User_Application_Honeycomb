@@ -16,8 +16,7 @@ from captcha_utils import (
     redis_client,
     generate_captcha_text,
     encrypt_aes_gcm,
-    decrypt_aes_gcm,
-    CaptchaVerifyRequest
+    decrypt_aes_gcm
 )
 
 # Configure logging
@@ -932,7 +931,10 @@ with app.app_context():
         status_code=500,
         detail="Unexpected output: " + output
     )
-
+class CaptchaVerifyRequest(BaseModel):
+    captcha_id: str
+    encrypted_input: dict  # { "iv": ..., "ciphertext": ..., "tag": ... }
+    
 @app.post("/downlink/captcha")
 
 async def generate_captcha():
@@ -942,7 +944,7 @@ async def generate_captcha():
 
         # Save captcha in Redis (expires in 5 minutes)
         await redis_client.setex(captcha_id, 300, captcha_text)
-
+        logger.info(f"Generated CAPTCHA: id={captcha_id}")
         # Encrypt captcha
         encrypted = encrypt_aes_gcm(captcha_text)
 
@@ -957,54 +959,69 @@ async def generate_captcha():
         )
 
     except ValueError as ve:
+        logger.warning(f"ValueError during CAPTCHA generation: {ve}")
         return JSONResponse(
             status_code=400,
             content={"status": "error", "detail": str(ve)}
         )
 
     except PermissionError as pe:
+        logger.warning(f"PermissionError during CAPTCHA generation: {pe}")
         return JSONResponse(
             status_code=403,
             content={"status": "error", "detail": str(pe)}
         )
 
     except Exception as e:
+        logger.error(f"Unexpected error during CAPTCHA generation: {e}", exc_info=True)
         return JSONResponse(
             status_code=500,
             content={"status": "error", "detail": "Internal Server Error: " + str(e)}
         )
-   
-# Verify Captcha Endpoint
 
+# ---------------------------
+# Verify Captcha Endpoint
+# ---------------------------
 @app.post("/downlink/captcha/verify")
 async def verify_captcha(request: CaptchaVerifyRequest):
     try:
         stored_captcha = await redis_client.get(request.captcha_id)
         if not stored_captcha:
+            logger.info(f"Captcha expired or invalid: id={request.captcha_id}")
             raise ValueError("Captcha expired or invalid")
 
         decrypted_input = decrypt_aes_gcm(request.encrypted_input)
 
-        if stored_captcha != decrypted_input:
+        if not decrypted_input or stored_captcha != decrypted_input:
+    # Generate new captcha if mismatch or null input
             new_captcha = generate_captcha_text()
             await redis_client.setex(request.captcha_id, 300, new_captcha)
             encrypted_new = encrypt_aes_gcm(new_captcha)
-            return {
+            logger.info(f"Captcha mismatch or null input for id={request.captcha_id}. New captcha generated.")
+
+            return JSONResponse(
+            status_code=400,  
+            content={
                 "status": "error",
-                "message": "Captcha mismatch. New captcha generated.",
+                "message": "Captcha mismatch or null input. New captcha generated.",
                 "captcha_id": request.captcha_id,
                 "encrypted_captcha": encrypted_new
             }
+        )
 
+        # Success: delete captcha from Redis
         await redis_client.delete(request.captcha_id)
+        logger.info(f"Captcha verified successfully: id={request.captcha_id}")
         return {"status": "ok", "message": "Captcha verified successfully"}
 
     except ValueError as ve:
+        logger.warning(f"Captcha verification failed: {ve}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(ve)
         )
     except PermissionError as pe:
+        logger.warning(f"Permission error during captcha verification: {pe}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(pe)
@@ -1012,6 +1029,7 @@ async def verify_captcha(request: CaptchaVerifyRequest):
     except HTTPException as he:
         raise he
     except Exception as e:
+        logger.error(f"Unexpected error during captcha verification: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal Server Error: " + str(e)

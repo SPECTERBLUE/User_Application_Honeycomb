@@ -6,6 +6,7 @@ import uvicorn
 from scheduler import start_scheduler
 from event_fetcher_parse import initialize_key_rotation, start_mqtt_client
 from captcha_utils import init_redis
+import asyncio
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -21,7 +22,6 @@ def run_api():
 
 def start_redis_thread():
     """Wrapper to start Redis connection check in a separate thread."""
-    import asyncio
     async def run_redis():
         await init_redis()
 
