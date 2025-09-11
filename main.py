@@ -5,6 +5,8 @@ import grpc
 import uvicorn
 from scheduler import start_scheduler
 from event_fetcher_parse import initialize_key_rotation, start_mqtt_client
+from captcha_utils import init_redis
+import asyncio
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -17,6 +19,20 @@ auth_token = config.AUTH_METADATA  # Set your authentication token here
 def run_api():
     """Function to run FastAPI server in a separate thread."""
     uvicorn.run("api_downlink:app", host="0.0.0.0", port=4567, reload=False)
+
+def start_redis_thread():
+    """Wrapper to start Redis connection check in a separate thread."""
+    async def run_redis():
+        await init_redis()
+
+    # Run the async redis init in its own event loop inside a thread
+    def thread_target():
+        asyncio.run(run_redis())
+
+    redis_thread = threading.Thread(target=thread_target, daemon=True)
+    redis_thread.start()
+    logger.info("Redis init thread started.")
+    return redis_thread
 
 if __name__ == "__main__":
     try:
@@ -34,6 +50,10 @@ if __name__ == "__main__":
 
         logger.info("Starting MQTT event listener...")
         start_mqtt_client()  # Runs in the main thread
+
+        logger.info("Starting Redis listener...")
+        start_redis_thread() 
+
 
     except KeyboardInterrupt:
         logger.info("Shutting down gracefully...")

@@ -55,3 +55,5 @@ Password = "grse2024"
 
 # Domain name  for honeycomb
 Domain = "GRSE"
+
+AES_KEY = b"n2342dwwendwejnwedwjkdnwedne2dxn"

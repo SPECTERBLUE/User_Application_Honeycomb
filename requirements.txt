@@ -1,5 +1,6 @@
 annotated-types==0.7.0
 anyio==4.9.0
+async-timeout==5.0.1
 cachetools==5.5.1
 certifi==2025.1.31
 cffi==1.17.1
@@ -7,6 +8,8 @@ charset-normalizer==3.4.1
 chirpstack-api==4.11.0
 click==8.1.8
 cryptography==44.0.0
+dnspython==2.7.0
+email_validator==2.2.0
 exceptiongroup==1.2.2
 fastapi==0.115.12
 google-api-core==2.24.1
@@ -35,6 +38,7 @@ PyExecJS==1.5.1
 Pygments==2.19.1
 pyjsparser==2.7.1
 pytest==8.3.4
+redis==6.4.0
 requests==2.32.3
 rich==13.9.4
 rsa==4.9
