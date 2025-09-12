@@ -1,10 +1,13 @@
-from fastapi import FastAPI, HTTPException, status, Path, Request
+from fastapi import FastAPI, HTTPException, status, Path, Request, Depends
 from fastapi.responses import JSONResponse
 import event_fetcher_parse as efp
 import User_token
 from pydantic import BaseModel, Field, field_validator, EmailStr
 from pydantic import FieldValidationInfo
 from fastapi.exceptions import RequestValidationError
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
+from auth import models,schemas,database,auth
 import json
 import os
 import logging
@@ -24,13 +27,81 @@ logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    docs_url=None,      # Disables Swagger UI (/docs)
-    redoc_url=None,     # Disables ReDoc (/redoc)
-    openapi_url=None    # Disables OpenAPI schema (/openapi.json)
+    #docs_url=None,      # Disables Swagger UI (/docs)
+    #redoc_url=None,     # Disables ReDoc (/redoc)
+    #openapi_url=None    # Disables OpenAPI schema (/openapi.json)
 )
 CONFIG_FILE = "config-api.json"
 JSON_FILE = "edgex_users.json"
 SUPERSET_CONTAINER = "superset_app"
+
+#AUTH_API ------------------------------------------------------------------
+
+def get_db():
+    db = database.SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@app.post("/downlink/register", response_model=schemas.UserResponse)
+def register(user: schemas.UserCreate,current_user = Depends(auth.get_current_user) ,db: Session = Depends(get_db)):
+    
+    db_user = db.query(models.User).filter(models.User.email == user.email).first()
+    if db_user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+
+    hashed_password = auth.get_password_hash(user.secret)
+    new_user = models.User(email=user.email, secret=hashed_password)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
+@app.post("/downlink/login", response_model=schemas.Token)
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = auth.authenticate_user(db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    access_token = auth.create_access_token(data={"sub": user.email})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/downlink/me", response_model=schemas.UserResponse)
+def read_users_me(current_user = Depends(auth.get_current_user)):
+    return current_user
+
+@app.put("/downlink/secret", response_model=schemas.UserResponse)
+def update_secret(update: schemas.SecretUpdate, current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    # Query the user again within the current session
+    user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    
+    if not auth.verify_password(update.old_secret, user.secret):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Old password is incorrect")
+
+    user.secret = auth.get_password_hash(update.new_secret)    
+    db.commit()
+    db.refresh(user)
+    return user
+    
+@app.put("/downlink/identity", response_model=schemas.UserResponse)
+def update_identity(update: schemas.IdentityUpdate, current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    # Query the user again within the current session
+    user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    
+    existing_user = db.query(models.User).filter(models.User.email == update.new_email).first()
+    if existing_user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already in use")
+
+    user.email = update.new_email
+    db.commit()
+    db.refresh(user)
+    return user
+
+@app.get("/protected-data")
+def protected_data(current_user = Depends(auth.validate_token)):
+    return {"message": f"Hello, {current_user.email}! This is protected data."}
+
 
 class UserRequest(BaseModel):
     username: str
