@@ -51,3 +51,13 @@ typing_extensions==4.12.2
 tzlocal==5.3
 urllib3==2.3.0
 uvicorn==0.34.0
+bcrypt==4.3.0
+ecdsa==0.19.1
+greenlet==3.2.4
+passlib==1.7.4
+psycopg2-binary==2.9.10
+python-dotenv==1.1.1
+python-jose==3.5.0
+python-multipart==0.0.20
+SQLAlchemy==2.0.43
+typing-inspection==0.4.1

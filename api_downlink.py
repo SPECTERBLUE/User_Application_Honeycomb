@@ -1,10 +1,13 @@
-from fastapi import FastAPI, HTTPException, status, Path, Request
+from fastapi import FastAPI, HTTPException, status, Path, Request, Depends, Body
 from fastapi.responses import JSONResponse
 import event_fetcher_parse as efp
 import User_token
 from pydantic import BaseModel, Field, field_validator, EmailStr
 from pydantic import FieldValidationInfo
 from fastapi.exceptions import RequestValidationError
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
+from auth import models,schemas,database,auth
 import json
 import os
 import logging
@@ -16,7 +19,8 @@ from captcha_utils import (
     redis_client,
     generate_captcha_text,
     encrypt_aes_gcm,
-    decrypt_aes_gcm
+    decrypt_aes_gcm,
+    decrypt_aes_gcm_downlink_login
 )
 
 # Configure logging
@@ -24,19 +28,102 @@ logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    docs_url=None,      # Disables Swagger UI (/docs)
-    redoc_url=None,     # Disables ReDoc (/redoc)
-    openapi_url=None    # Disables OpenAPI schema (/openapi.json)
+    #docs_url=None,      # Disables Swagger UI (/docs)
+    #redoc_url=None,     # Disables ReDoc (/redoc)
+    #openapi_url=None    # Disables OpenAPI schema (/openapi.json)
 )
 CONFIG_FILE = "config-api.json"
 JSON_FILE = "edgex_users.json"
 SUPERSET_CONTAINER = "superset_app"
 
+#AUTH_API ------------------------------------------------------------------
+
+def get_db():
+    db = database.SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@app.post("/downlink/register", response_model=schemas.UserResponse)
+def register(user: schemas.UserCreate,current_user = Depends(auth.get_current_user) ,db: Session = Depends(get_db)):
+    
+    db_user = db.query(models.User).filter(models.User.email == user.email).first()
+    if db_user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+
+    hashed_password = auth.get_password_hash(user.secret)
+    new_user = models.User(email=user.email, secret=hashed_password)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
+class LoginRequest(BaseModel):
+    identity: dict  # { "iv": ..., "ciphertext": ..., "tag": ... }
+    secret: dict  # { "iv": ..., "ciphertext": ..., "tag": ... }
+
+@app.post("/downlink/login", response_model=schemas.Token)
+def login(
+    data: LoginRequest = Body(...),  # receives encrypted identity and password
+    db: Session = Depends(get_db)
+):
+    # Decrypt username and password
+    username = decrypt_aes_gcm_downlink_login(data.identity)
+    password = decrypt_aes_gcm_downlink_login(data.secret)
+
+    if not username or not password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid encrypted data")
+
+    # Authenticate user with decrypted credentials
+    user = auth.authenticate_user(db, username, password)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    access_token = auth.create_access_token(data={"sub": user.email})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/downlink/me", response_model=schemas.UserResponse)
+def read_users_me(current_user = Depends(auth.get_current_user)):
+    return current_user
+
+@app.put("/downlink/secret", response_model=schemas.UserResponse)
+def update_secret(update: schemas.SecretUpdate, current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    # Query the user again within the current session
+    user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    
+    if not auth.verify_password(update.old_secret, user.secret):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Old password is incorrect")
+
+    user.secret = auth.get_password_hash(update.new_secret)    
+    db.commit()
+    db.refresh(user)
+    return user
+    
+@app.put("/downlink/identity", response_model=schemas.UserResponse)
+def update_identity(update: schemas.IdentityUpdate, current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    # Query the user again within the current session
+    user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    
+    existing_user = db.query(models.User).filter(models.User.email == update.new_email).first()
+    if existing_user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already in use")
+
+    user.email = update.new_email
+    db.commit()
+    db.refresh(user)
+    return user
+
+@app.get("/protected-data")
+def protected_data(current_user = Depends(auth.validate_token)):
+    return {"message": f"Hello, {current_user.email}! This is protected data."}
+
+
 class UserRequest(BaseModel):
     username: str
 
 @app.post("/downlink/get-token")
-def get_token(request: UserRequest):
+def get_token(request: UserRequest, auth: str = Depends(auth.validate_token)):
     """Return token for a given username from JSON file."""
 
     if not os.path.exists(JSON_FILE):
@@ -57,7 +144,7 @@ def get_token(request: UserRequest):
     
 
 @app.get("/downlink/edgex_token_list")
-def get_token_list():
+def get_token_list(auth: str = Depends(auth.validate_token)):
     """Return all tokens from JSON file."""
     if not os.path.exists(JSON_FILE):
         raise HTTPException(status_code=500, detail="Token store not found.")
@@ -71,7 +158,7 @@ def get_token_list():
         raise HTTPException(status_code=500, detail=f"Error reading token store: {e}")
     
 @app.post("/downlink/edgex_token_list_update")
-def update_token_list(data: dict):
+def update_token_list(data: dict, auth: str = Depends(auth.validate_token)):
     """
     Overwrite the JSON file with new token data.
 
@@ -118,7 +205,7 @@ def update_token_list(data: dict):
         raise HTTPException(status_code=500, detail=f"Error writing to token store: {e}")
     
 @app.get("/downlink/honeycomb_user_list")
-def get_honeycomb_user_list():
+def get_honeycomb_user_list( auth: str = Depends(auth.validate_token)):
    """Returns the list of user after runing update_user_list() function."""
    try:
         # Call the function to update the user list
@@ -136,7 +223,7 @@ def get_honeycomb_user_list():
        raise HTTPException(status_code=500, detail=f"Error reading token store: {e}") 
    
 @app.post("/downlink/jwt_rotation", status_code=status.HTTP_200_OK)
-def jwt_rotation():
+def jwt_rotation( auth: str = Depends(auth.validate_token)):
     """
     Endpoint to trigger JWT rotation for all users.
     """
@@ -153,7 +240,7 @@ def jwt_rotation():
         )
 
 @app.post("/downlink/reset-keyrotation", status_code=status.HTTP_200_OK)
-async def resetkeyrotation(data: dict):
+async def resetkeyrotation(data: dict, auth: str = Depends(auth.validate_token)):
     """
     Endpoint to send downlink data for resetting key rotation.
     """
@@ -229,7 +316,7 @@ def get_update_info():
 
 
 @app.post("/downlink/update-frequency", status_code=status.HTTP_200_OK)
-async def update_frequency(update_frequency: int, dev_euid: str):
+async def update_frequency(update_frequency: int, dev_euid: str, auth: str = Depends(auth.validate_token)):
     """
     Endpoint to send downlink data for updating frequency.
     """
@@ -296,7 +383,7 @@ async def get_config():
     return get_update_info()
 
 @app.post("/downlink/device-reboot", status_code=status.HTTP_200_OK)
-async def device_reboot(dev_euid: str):
+async def device_reboot(dev_euid: str, auth: str = Depends(auth.validate_token)):
     """
     Endpoint to send downlink data for device reboot.
     """
@@ -332,7 +419,7 @@ async def device_reboot(dev_euid: str):
         )
    
 @app.post("/downlink/device-status", status_code=status.HTTP_200_OK)
-async def device_status(dev_euid: str):
+async def device_status(dev_euid: str, auth: str = Depends(auth.validate_token)):
     """
     Endpoint to send downlink data for device status.
     """
@@ -368,7 +455,7 @@ async def device_status(dev_euid: str):
         )
         
 @app.post("/downlink/log-level", status_code=status.HTTP_200_OK)
-async def log_level(dev_euid: str,level: int):
+async def log_level(dev_euid: str,level: int, auth: str = Depends(auth.validate_token)):
     """
     Endpoint to set the logging level.
     """
@@ -408,7 +495,7 @@ async def log_level(dev_euid: str,level: int):
         )
         
 @app.post("/downlink/time-sync", status_code=status.HTTP_200_OK)
-async def time_sync(dev_euid: str):
+async def time_sync(dev_euid: str, auth: str = Depends(auth.validate_token)):
     """
     Endpoint to send downlink data for time synchronization.
     """
@@ -444,7 +531,7 @@ async def time_sync(dev_euid: str):
         )
     
 @app.post("/downlink/reset-device", status_code=status.HTTP_200_OK)
-async def reset_device(dev_euid: str):
+async def reset_device(dev_euid: str, auth: str = Depends(auth.validate_token)):
     """
     Endpoint to send downlink data for device reset.(factory reset)
     """
@@ -515,7 +602,7 @@ def validate_username(username: str):
     description="Generates a password for EdgeX.",
     response_description="The generated password for the user"
 )
-async def generate_password(user_req: UserRequest):
+async def generate_password(user_req: UserRequest, auth: str = Depends(auth.validate_token)):
     username = user_req.username
     validate_username(username)
 
@@ -565,7 +652,7 @@ async def generate_password(user_req: UserRequest):
         )
 
 @app.post("/downlink/create-chirpstack-api-key/{name}", summary="Create ChirpStack API Key", description="Creates an API key in ChirpStack.")
-async def create_api_key(name: str = Path(..., min_length=1, description="API key name")):
+async def create_api_key(name: str = Path(..., min_length=1, description="API key name"), auth: str = Depends(auth.validate_token)):
     """
     Uses the ChirpStack CLI inside the container to generate an API key.
     """
@@ -614,7 +701,7 @@ async def create_api_key(name: str = Path(..., min_length=1, description="API ke
         )
 
 @app.get("/downlink/tokens", summary="Get Root Token", description="Extracts the last root token and returns it as JSON.")
-def get_tokens():
+def get_tokens( auth: str = Depends(auth.validate_token)):
     """
     Reads the root token from the Vault response JSON file inside the container.
     """
@@ -729,7 +816,7 @@ class UserCreate(BaseModel):
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
+async def validation_exception_handler(request: Request, exc: RequestValidationError, auth: str = Depends(auth.validate_token)):
     errors = exc.errors()
     error_messages = []
 
@@ -750,7 +837,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 @app.post("/downlink/create_superset_user", status_code=status.HTTP_200_OK)
-async def create_superset_user(user: UserCreate):
+async def create_superset_user(user: UserCreate, auth: str = Depends(auth.validate_token)):
     try:
         if not user.username or not user.email or not user.password:
             raise ValueError("Username, email, and password are required.")
@@ -822,7 +909,7 @@ class PasswordChangeRequest(BaseModel):
 
 
 @app.post("/downlink/change_password", status_code=status.HTTP_200_OK)
-async def change_password(body: PasswordChangeRequest):
+async def change_password(body: PasswordChangeRequest, auth: str = Depends(auth.validate_token)):
     # 1. Password pattern: At least 8 chars, one uppercase, one lowercase, one digit, one special char
     password_pattern = re.compile(
         r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)"
@@ -941,7 +1028,7 @@ class CaptchaVerifyRequest(BaseModel):
     
 @app.post("/downlink/captcha")
 
-async def generate_captcha():
+async def generate_captcha( auth: str = Depends(auth.validate_token)):
     try:
         captcha_text = generate_captcha_text()
         captcha_id = str(uuid.uuid4())
@@ -987,7 +1074,7 @@ async def generate_captcha():
 # Verify Captcha Endpoint
 # ---------------------------
 @app.post("/downlink/captcha/verify")
-async def verify_captcha(request: CaptchaVerifyRequest):
+async def verify_captcha(request: CaptchaVerifyRequest, auth: str = Depends(auth.validate_token)):
     try:
         stored_captcha = await redis_client.get(request.captcha_id)
         if not stored_captcha:

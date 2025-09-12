@@ -3,10 +3,18 @@ import logging
 import config
 import grpc
 import uvicorn
+import os
 from scheduler import start_scheduler
 from event_fetcher_parse import initialize_key_rotation, start_mqtt_client
 from captcha_utils import init_redis
 import asyncio
+# Load the .env file from auth folder
+from dotenv import load_dotenv
+from pathlib import Path
+env_path = Path('.') / 'auth' / '.env'
+load_dotenv(dotenv_path=env_path)
+
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -25,7 +33,6 @@ def start_redis_thread():
     async def run_redis():
         await init_redis()
 
-    # Run the async redis init in its own event loop inside a thread
     def thread_target():
         asyncio.run(run_redis())
 
@@ -36,6 +43,36 @@ def start_redis_thread():
 
 if __name__ == "__main__":
     try:
+        from api_downlink import models, database, auth
+                
+        logger.info("Initializing database...")
+        models.Base.metadata.create_all(bind=database.engine)
+
+        # Create default admin if not exists
+        def create_default_admin():
+            db = database.SessionLocal()
+            try:
+                email = os.getenv("DEFAULT_ADMIN_EMAIL")
+                secret = os.getenv("DEFAULT_ADMIN_SECRET")
+
+                if not email or not secret:
+                    logger.warning("DEFAULT_ADMIN_EMAIL or DEFAULT_ADMIN_SECRET not set!")
+                    return
+
+                user = db.query(models.User).filter(models.User.email == email).first()
+                if user:
+                    logger.info("Default admin already exists.")
+                else:
+                    hashed_secret = auth.get_password_hash(secret)
+                    new_admin = models.User(email=email, secret=hashed_secret)
+                    db.add(new_admin)
+                    db.commit()
+                    logger.info("Default admin created.")
+            finally:
+                db.close()
+
+        create_default_admin()
+
         logger.info("Starting API server...")
         api_thread = threading.Thread(target=run_api, daemon=True)
         api_thread.start()
@@ -52,8 +89,7 @@ if __name__ == "__main__":
         start_mqtt_client()  # Runs in the main thread
 
         logger.info("Starting Redis listener...")
-        start_redis_thread() 
-
+        start_redis_thread()
 
     except KeyboardInterrupt:
         logger.info("Shutting down gracefully...")
