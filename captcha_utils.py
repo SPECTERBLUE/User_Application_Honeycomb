@@ -44,7 +44,7 @@ async def close_redis():
 # ---------------------------
 AES_KEY = config.AES_KEY  # Must be 32 bytes
 aesgcm = AESGCM(AES_KEY)
-
+login_aesgcm = AESGCM(config.LOGIN_AESGCM_KEY)  # Must be 32 bytes
 # ---------------------------
 # Generate Captcha Text (6 chars)
 # ---------------------------
@@ -89,4 +89,22 @@ def decrypt_aes_gcm(encrypted: dict):
         return plaintext
     except Exception as e:
         logger.warning(f"Failed to decrypt captcha: {e}", exc_info=True)
+        return None
+
+def decrypt_aes_gcm_downlink_login(encrypted: dict):
+    if not encrypted or not all(k in encrypted for k in ("iv", "ciphertext", "tag")):
+        # Log and return None to indicate invalid input
+        logger.warning("Encrypted input is null or incomplete")
+        return None
+
+    try:
+        iv = base64.b64decode(encrypted["iv"])
+        ciphertext = base64.b64decode(encrypted["ciphertext"])
+        tag = base64.b64decode(encrypted["tag"])
+        combined = ciphertext + tag
+        plaintext = login_aesgcm.decrypt(iv, combined, None).decode()
+        logger.info(f"Decrypted captcha text: {plaintext}")
+        return plaintext
+    except Exception as e:
+        logger.warning(f"Failed to decrypt : {e}", exc_info=True)
         return None

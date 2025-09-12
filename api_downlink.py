@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, status, Path, Request, Depends
+from fastapi import FastAPI, HTTPException, status, Path, Request, Depends, Body
 from fastapi.responses import JSONResponse
 import event_fetcher_parse as efp
 import User_token
@@ -19,7 +19,8 @@ from captcha_utils import (
     redis_client,
     generate_captcha_text,
     encrypt_aes_gcm,
-    decrypt_aes_gcm
+    decrypt_aes_gcm,
+    decrypt_aes_gcm_downlink_login
 )
 
 # Configure logging
@@ -58,9 +59,24 @@ def register(user: schemas.UserCreate,current_user = Depends(auth.get_current_us
     db.refresh(new_user)
     return new_user
 
+class LoginRequest(BaseModel):
+    identity: dict  # { "iv": ..., "ciphertext": ..., "tag": ... }
+    secret: dict  # { "iv": ..., "ciphertext": ..., "tag": ... }
+
 @app.post("/downlink/login", response_model=schemas.Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = auth.authenticate_user(db, form_data.username, form_data.password)
+def login(
+    data: LoginRequest = Body(...),  # receives encrypted identity and password
+    db: Session = Depends(get_db)
+):
+    # Decrypt username and password
+    username = decrypt_aes_gcm_downlink_login(data.identity)
+    password = decrypt_aes_gcm_downlink_login(data.secret)
+
+    if not username or not password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid encrypted data")
+
+    # Authenticate user with decrypted credentials
+    user = auth.authenticate_user(db, username, password)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
