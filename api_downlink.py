@@ -107,7 +107,7 @@ class UserRequest(BaseModel):
     username: str
 
 @app.post("/downlink/get-token")
-def get_token(request: UserRequest):
+def get_token(request: UserRequest, auth: str = Depends(auth.validate_token)):
     """Return token for a given username from JSON file."""
 
     if not os.path.exists(JSON_FILE):
@@ -128,7 +128,7 @@ def get_token(request: UserRequest):
     
 
 @app.get("/downlink/edgex_token_list")
-def get_token_list():
+def get_token_list(auth: str = Depends(auth.validate_token)):
     """Return all tokens from JSON file."""
     if not os.path.exists(JSON_FILE):
         raise HTTPException(status_code=500, detail="Token store not found.")
@@ -142,7 +142,7 @@ def get_token_list():
         raise HTTPException(status_code=500, detail=f"Error reading token store: {e}")
     
 @app.post("/downlink/edgex_token_list_update")
-def update_token_list(data: dict):
+def update_token_list(data: dict, auth: str = Depends(auth.validate_token)):
     """
     Overwrite the JSON file with new token data.
 
@@ -189,7 +189,7 @@ def update_token_list(data: dict):
         raise HTTPException(status_code=500, detail=f"Error writing to token store: {e}")
     
 @app.get("/downlink/honeycomb_user_list")
-def get_honeycomb_user_list():
+def get_honeycomb_user_list( auth: str = Depends(auth.validate_token)):
    """Returns the list of user after runing update_user_list() function."""
    try:
         # Call the function to update the user list
@@ -207,7 +207,7 @@ def get_honeycomb_user_list():
        raise HTTPException(status_code=500, detail=f"Error reading token store: {e}") 
    
 @app.post("/downlink/jwt_rotation", status_code=status.HTTP_200_OK)
-def jwt_rotation():
+def jwt_rotation( auth: str = Depends(auth.validate_token)):
     """
     Endpoint to trigger JWT rotation for all users.
     """
@@ -224,7 +224,7 @@ def jwt_rotation():
         )
 
 @app.post("/downlink/reset-keyrotation", status_code=status.HTTP_200_OK)
-async def resetkeyrotation(data: dict):
+async def resetkeyrotation(data: dict, auth: str = Depends(auth.validate_token)):
     """
     Endpoint to send downlink data for resetting key rotation.
     """
@@ -300,7 +300,7 @@ def get_update_info():
 
 
 @app.post("/downlink/update-frequency", status_code=status.HTTP_200_OK)
-async def update_frequency(update_frequency: int, dev_euid: str):
+async def update_frequency(update_frequency: int, dev_euid: str, auth: str = Depends(auth.validate_token)):
     """
     Endpoint to send downlink data for updating frequency.
     """
@@ -367,7 +367,7 @@ async def get_config():
     return get_update_info()
 
 @app.post("/downlink/device-reboot", status_code=status.HTTP_200_OK)
-async def device_reboot(dev_euid: str):
+async def device_reboot(dev_euid: str, auth: str = Depends(auth.validate_token)):
     """
     Endpoint to send downlink data for device reboot.
     """
@@ -403,7 +403,7 @@ async def device_reboot(dev_euid: str):
         )
    
 @app.post("/downlink/device-status", status_code=status.HTTP_200_OK)
-async def device_status(dev_euid: str):
+async def device_status(dev_euid: str, auth: str = Depends(auth.validate_token)):
     """
     Endpoint to send downlink data for device status.
     """
@@ -439,7 +439,7 @@ async def device_status(dev_euid: str):
         )
         
 @app.post("/downlink/log-level", status_code=status.HTTP_200_OK)
-async def log_level(dev_euid: str,level: int):
+async def log_level(dev_euid: str,level: int, auth: str = Depends(auth.validate_token)):
     """
     Endpoint to set the logging level.
     """
@@ -479,7 +479,7 @@ async def log_level(dev_euid: str,level: int):
         )
         
 @app.post("/downlink/time-sync", status_code=status.HTTP_200_OK)
-async def time_sync(dev_euid: str):
+async def time_sync(dev_euid: str, auth: str = Depends(auth.validate_token)):
     """
     Endpoint to send downlink data for time synchronization.
     """
@@ -515,7 +515,7 @@ async def time_sync(dev_euid: str):
         )
     
 @app.post("/downlink/reset-device", status_code=status.HTTP_200_OK)
-async def reset_device(dev_euid: str):
+async def reset_device(dev_euid: str, auth: str = Depends(auth.validate_token)):
     """
     Endpoint to send downlink data for device reset.(factory reset)
     """
@@ -586,7 +586,7 @@ def validate_username(username: str):
     description="Generates a password for EdgeX.",
     response_description="The generated password for the user"
 )
-async def generate_password(user_req: UserRequest):
+async def generate_password(user_req: UserRequest, auth: str = Depends(auth.validate_token)):
     username = user_req.username
     validate_username(username)
 
@@ -636,7 +636,7 @@ async def generate_password(user_req: UserRequest):
         )
 
 @app.post("/downlink/create-chirpstack-api-key/{name}", summary="Create ChirpStack API Key", description="Creates an API key in ChirpStack.")
-async def create_api_key(name: str = Path(..., min_length=1, description="API key name")):
+async def create_api_key(name: str = Path(..., min_length=1, description="API key name"), auth: str = Depends(auth.validate_token)):
     """
     Uses the ChirpStack CLI inside the container to generate an API key.
     """
@@ -685,7 +685,7 @@ async def create_api_key(name: str = Path(..., min_length=1, description="API ke
         )
 
 @app.get("/downlink/tokens", summary="Get Root Token", description="Extracts the last root token and returns it as JSON.")
-def get_tokens():
+def get_tokens( auth: str = Depends(auth.validate_token)):
     """
     Reads the root token from the Vault response JSON file inside the container.
     """
@@ -800,7 +800,7 @@ class UserCreate(BaseModel):
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
+async def validation_exception_handler(request: Request, exc: RequestValidationError, auth: str = Depends(auth.validate_token)):
     errors = exc.errors()
     error_messages = []
 
@@ -821,7 +821,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 @app.post("/downlink/create_superset_user", status_code=status.HTTP_200_OK)
-async def create_superset_user(user: UserCreate):
+async def create_superset_user(user: UserCreate, auth: str = Depends(auth.validate_token)):
     try:
         if not user.username or not user.email or not user.password:
             raise ValueError("Username, email, and password are required.")
@@ -893,7 +893,7 @@ class PasswordChangeRequest(BaseModel):
 
 
 @app.post("/downlink/change_password", status_code=status.HTTP_200_OK)
-async def change_password(body: PasswordChangeRequest):
+async def change_password(body: PasswordChangeRequest, auth: str = Depends(auth.validate_token)):
     # 1. Password pattern: At least 8 chars, one uppercase, one lowercase, one digit, one special char
     password_pattern = re.compile(
         r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)"
@@ -1012,7 +1012,7 @@ class CaptchaVerifyRequest(BaseModel):
     
 @app.post("/downlink/captcha")
 
-async def generate_captcha():
+async def generate_captcha( auth: str = Depends(auth.validate_token)):
     try:
         captcha_text = generate_captcha_text()
         captcha_id = str(uuid.uuid4())
@@ -1058,7 +1058,7 @@ async def generate_captcha():
 # Verify Captcha Endpoint
 # ---------------------------
 @app.post("/downlink/captcha/verify")
-async def verify_captcha(request: CaptchaVerifyRequest):
+async def verify_captcha(request: CaptchaVerifyRequest, auth: str = Depends(auth.validate_token)):
     try:
         stored_captcha = await redis_client.get(request.captcha_id)
         if not stored_captcha:
