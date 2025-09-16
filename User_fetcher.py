@@ -4,25 +4,34 @@ import logging
 import json
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-
+       
 class UserFetcher:
-    def __init__(self, base_url=config.BASE_URL, identity=config.Username, secret=config.Password):
+    def __init__(self, base_url=config.BASE_URL, identity=config.encrypted_user, secret=config.encrypted_pass):
         """
         Initializes the UserFetcher with a base URL and credentials.
+        identity and secret can be JSON objects (dict).
         """
         if not base_url:
             raise ValueError("Base URL cannot be empty.")
         if not isinstance(base_url, str):
             raise TypeError("Base URL must be a string.")
-        
+
+        # identity and secret can be either string or dict
+        if isinstance(identity, dict):
+            self.identity = identity
+        else:
+            raise TypeError("Identity must be a string or dict.")
+
+        if isinstance(secret, dict):
+            self.secret = secret
+        else:
+            raise TypeError("Secret must be a string or dict.")
 
         self.base_url = base_url
-        self.identity = identity
-        self.secret = secret
 
         logging.info(f"UserFetcher initialized with base_url: {self.base_url}")
-        
+        logging.info(f"Identity: {self.identity}")
+        logging.info(f"Secret: {self.secret}")
     
     def fetch_auth_token(self):
         """
@@ -44,8 +53,9 @@ class UserFetcher:
             response.raise_for_status()
             token_data = response.json()
 
-            access_token = token_data.get("access_token")
-            refresh_token = token_data.get("refresh_token")
+            data = token_data.get("data", {})
+            access_token = data.get("access_token")
+            refresh_token = data.get("refresh_token")
 
             if access_token and refresh_token:
                 logging.info("Authentication tokens fetched successfully.")
@@ -128,8 +138,9 @@ class UserFetcher:
             response.raise_for_status()
             token_data = response.json()
 
-            access_token = token_data.get("access_token")
-            refresh_token = token_data.get("refresh_token")
+            data = token_data.get("data", {})
+            access_token = data.get("access_token")
+            refresh_token = data.get("refresh_token")
 
             if access_token and refresh_token:
                 logging.info("Authentication tokens with domain ID fetched successfully.")
