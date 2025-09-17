@@ -1,6 +1,6 @@
 # ChirpStack gRPC Configuration
-CHIRPSTACK_HOST = "10.12.82.105:8088"  # Ensure this is the correct ChirpStack gRPC server address
-API_TOKEN = ""  # Replace with your API token
+CHIRPSTACK_HOST = "localhost:8088"  # Ensure this is the correct ChirpStack gRPC server address
+API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjaGlycHN0YWNrIiwiaXNzIjoiY2hpcnBzdGFjayIsInN1YiI6IjY4N2JkYjA2LTFmNTgtNGQ5ZS05MmMzLTNlZGNlMDQ2YzZjMCIsInR5cCI6ImtleSJ9.g5aP9FJrT-3ImHC1I1U0HiItxgD8JBp8mzm-wsrTgQI"  # Replace with your API token
 # Not needed
 APPLICATION_ID = None  # Remove hardcoded Application ID
 TENANT_ID = None  # Replace with your tenant ID
@@ -14,7 +14,7 @@ LIMIT = 100
 OFFSET = 0
 
 # mqtt
-mqtt = "10.12.82.105"
+mqtt = "localhost"
 keepalive = 60
 
 # Add authorization metadata
@@ -57,3 +57,4 @@ Password = "grse2024"
 Domain = "GRSE"
 
 AES_KEY = b"n2342dwwendwejnwedwjkdnwedne2dxn"
+LOGIN_AESGCM_KEY = b"bR7xZ1qP8eWn4vFVS23KY92MuXqGdEL0"
