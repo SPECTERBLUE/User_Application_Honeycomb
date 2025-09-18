@@ -80,7 +80,9 @@ def login(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    access_token = auth.create_access_token(data={"sub": user.email})
+    #access_token = auth.create_access_token(data={"sub": user.email})
+    access_token = auth.create_access_token(data={"sub": str(user.id)})
+
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.get("/downlink/me", response_model=schemas.UserResponse)
