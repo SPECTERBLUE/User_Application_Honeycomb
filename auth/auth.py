@@ -55,13 +55,13 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if not email:
+        user_id: str = payload.get("sub")
+        if not user_id:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
 
-    user = get_user(db, email=email)
+    user = db.query(models.User).filter(models.User.id == int(user_id)).first()
     if not user:
         raise credentials_exception
     return user
@@ -74,13 +74,13 @@ def validate_token(token: str = Depends(oauth2_scheme), db: Session = Depends(ge
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if not email:
+        user_id: str = payload.get("sub")
+        if not user_id:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
 
-    user = get_user(db, email=email)
+    user = db.query(models.User).filter(models.User.id == int(user_id)).first()
     if not user:
         raise credentials_exception
     return user
