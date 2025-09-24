@@ -121,12 +121,14 @@ def protected_data(current_user = Depends(auth.validate_token)):
     return {"message": f"Hello, {current_user.email}! This is protected data."}
 
 
-class UserRequest(BaseModel):
-    username: str
+class UserRequestToken(BaseModel):
+    username_enc: dict
 
 @app.post("/downlink/get-token")
-def get_token(request: UserRequest, auth: str = Depends(auth.validate_token)):
+def get_token(request: UserRequestToken, auth: str = Depends(auth.validate_token)):
     """Return token for a given username from JSON file."""
+    
+    username = decrypt_aes_gcm_downlink_login(request.username_enc)
 
     if not os.path.exists(JSON_FILE):
         raise HTTPException(status_code=500, detail="Token store not found.")
@@ -136,8 +138,8 @@ def get_token(request: UserRequest, auth: str = Depends(auth.validate_token)):
             data = json.load(f)
 
         for entry in data:
-            if entry.get("username") == request.username:
-                return {"username": request.username, "token": entry.get("token", "")}
+            if entry.get("username") == username:
+                return {"token": entry.get("token", "")}
 
         raise HTTPException(status_code=404, detail="User not found.")
     
