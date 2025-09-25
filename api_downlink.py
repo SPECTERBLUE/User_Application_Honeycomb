@@ -60,29 +60,44 @@ def register(user: schemas.UserCreate,current_user = Depends(auth.get_current_us
     return new_user
 
 class LoginRequest(BaseModel):
-    identity: dict  # { "iv": ..., "ciphertext": ..., "tag": ... }
-    secret: dict  # { "iv": ..., "ciphertext": ..., "tag": ... }
+    captcha_id: str
+    encrypted_input: dict  # { "iv": ..., "ciphertext": ..., "tag": ... }
+    identity: dict
+    secret: dict
 
 @app.post("/downlink/login", response_model=schemas.Token)
-def login(
-    data: LoginRequest = Body(...),  # receives encrypted identity and password
+async def login(
+    data: LoginRequest = Body(...),
     db: Session = Depends(get_db)
 ):
-    # Decrypt username and password
+    # 1. Verify captcha
+    stored_captcha = await redis_client.get(data.captcha_id)
+    try:
+        decrypted_input = decrypt_aes_gcm(data.encrypted_input)
+    except Exception:
+        await redis_client.delete(data.captcha_id)
+        return JSONResponse(status_code=400, content={"status":"error","message":"Invalid captcha input."})
+
+    if not stored_captcha or stored_captcha != decrypted_input:
+        await redis_client.delete(data.captcha_id)
+        return JSONResponse(status_code=400, content={"status":"error","message":"Captcha mismatch or null input."})
+
+    # Delete captcha after successful verification (single-use)
+    await redis_client.delete(data.captcha_id)
+
+    # 2. Decrypt username and password
     username = decrypt_aes_gcm_downlink_login(data.identity)
     password = decrypt_aes_gcm_downlink_login(data.secret)
-
     if not username or not password:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid encrypted data")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid encrypted credentials")
 
-    # Authenticate user with decrypted credentials
+    # 4. Authenticate
     user = auth.authenticate_user(db, username, password)
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials. Request a new captcha.")
 
-    #access_token = auth.create_access_token(data={"sub": user.email})
+    # 5. Create access token
     access_token = auth.create_access_token(data={"sub": str(user.id)})
-
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.get("/downlink/me", response_model=schemas.UserResponse)
@@ -1032,7 +1047,7 @@ class CaptchaVerifyRequest(BaseModel):
     
 @app.post("/downlink/captcha")
 
-async def generate_captcha( auth: str = Depends(auth.validate_token)):
+async def generate_captcha():
     try:
         captcha_text = generate_captcha_text()
         captcha_id = str(uuid.uuid4())
