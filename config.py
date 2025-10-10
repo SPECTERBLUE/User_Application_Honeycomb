@@ -1,6 +1,8 @@
+
 # ChirpStack gRPC Configuration
 CHIRPSTACK_HOST = "localhost:8088"  # Ensure this is the correct ChirpStack gRPC server address
 API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjaGlycHN0YWNrIiwiaXNzIjoiY2hpcnBzdGFjayIsInN1YiI6IjY4N2JkYjA2LTFmNTgtNGQ5ZS05MmMzLTNlZGNlMDQ2YzZjMCIsInR5cCI6ImtleSJ9.g5aP9FJrT-3ImHC1I1U0HiItxgD8JBp8mzm-wsrTgQI"  # Replace with your API token
+
 # Not needed
 APPLICATION_ID = None  # Remove hardcoded Application ID
 TENANT_ID = None  # Replace with your tenant ID
@@ -47,14 +49,28 @@ CONTAINER_VAULT = "edgex-security-secretstore-setup"
 VAULT_ROOT_PATH = "/vault/config/assets/resp-init.json"
 
 # base url for user fetcher from honeycomb
-BASE_URL = "https://iot.meridiandatalabs.com"
+BASE_URL = "http://localhost:80"
 
 # user credentials for honeycomb
-Username = "admin@mdl.com"
-Password = "grse2024"
+# Username = "admin@mdl.com"
+# Password = "grse2024"
+
+encrypted_user = {
+    "iv": "9HCBQdwicgPlsWr+",
+    "ciphertext": "wDWyk5/v6U+enmu8wQ==",
+    "tag": "fqRo3CMAQbuh0JPisFRvPw=="
+}
+
+# Store secret as a dict
+encrypted_pass = {
+    "iv": "wJ5DJZP4RVcFjn+u",
+    "ciphertext": "NcvLKS4zmnE=",
+    "tag": "3t7ihXeewTFSjYYBEkRvWw=="
+}
 
 # Domain name  for honeycomb
 Domain = "GRSE"
 
 AES_KEY = b"n2342dwwendwejnwedwjkdnwedne2dxn"
 LOGIN_AESGCM_KEY = b"bR7xZ1qP8eWn4vFVS23KY92MuXqGdEL0"
+
