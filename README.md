@@ -155,3 +155,101 @@ This project is licensed under the **MIT License**.
 ## **👨‍💻 Contributing**
 Pull requests are welcome! Open an issue for discussions.
 
+
+
+## **Migrate Database For MFA(Existing instalaltions)**
+---
+
+# **Database Migration Guide (Alembic)**
+
+This section explains how to set up and run a database migration using **Alembic** for the Honeycomb User Application.
+
+---
+
+## 🧩 **1. Install Dependencies**
+
+Make sure you have a virtual environment activated, then install all required Python packages:
+
+pip install -r requirements.txt
+
+---
+
+## ⚙️ **2. Initialize Alembic**
+
+Create a new Alembic migration environment:
+
+alembic init alembic
+
+This will create a folder named **alembic/** and a configuration file **alembic.ini** in your project directory.
+
+---
+
+## 🛠️ **3. Configure Database URL**
+
+Open the **alembic.ini** file and verify that the sqlalchemy.url line is configured correctly.
+
+It should look like this (update values as per your local setup):
+
+[alembic]
+# ... don't change anything above ...
+
+sqlalchemy.url = postgresql://myuser:mypassword@localhost:5434/mydatabase
+
+---
+
+## 🧬 **4. Update env.py**
+
+Open the file **alembic/env.py** inside the alembic/ directory and make the following changes.
+
+# from myapp import mymodel
+# target_metadata = mymodel.Base.metadata
+
+### 🔹 Add these lines below under the above commented lines (After line 20):
+
+from dotenv import load_dotenv
+load_dotenv()
+
+from auth.database import Base
+target_metadata = Base.metadata
+
+This ensures Alembic can detect your SQLAlchemy models and load environment variables from .env.
+
+---
+
+## 🧱 **5. Create a New Migration Revision**
+
+Now, generate a new migration file to add a new column to the users table:
+
+alembic revision -m "add mfa_secret to users"
+
+This command will create a new file under **alembic/versions/**.
+
+---
+
+## ✏️ **6. Edit the Generated Revision**
+
+Open the newly created migration file under **alembic/versions/**, and replace its content with the following:
+
+def upgrade():
+    op.add_column('users', sa.Column('mfa_secret', sa.String(length=64), nullable=True))
+
+
+def downgrade():
+    op.drop_column('users', 'mfa_secret')
+
+This defines what happens when you apply (upgrade) or revert (downgrade) the migration.
+
+---
+
+## 🚀 **7. Apply the Migration**
+
+Run the migration to update your database schema:
+
+alembic upgrade head
+
+If successful, the new column mfa_secret will be added to the users table.
+
+---
+
+
+You’ve successfully completed the Alembic migration setup and applied your first migration.
