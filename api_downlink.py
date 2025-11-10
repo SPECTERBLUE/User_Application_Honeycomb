@@ -65,40 +65,52 @@ def register(user: schemas.UserCreate,current_user = Depends(auth.get_current_us
     db.refresh(new_user)
     return new_user
 
-@app.post("/downlink/mfa/enable", summary="Enable MFA for existing user")
-def enable_mfa(current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+class MFAEnableReq(BaseModel):
+    email: EmailStr
+
+
+@app.post("/downlink/mfa/enable", summary="Enable MFA for a user by email")
+def enable_mfa(
+    req: MFAEnableReq,
+    current_user = Depends(auth.get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Enables MFA for the currently authenticated user.
-    Generates a new MFA secret, stores it in DB, and returns the provisioning URI and QR code.
+    Enables MFA for the given user (provided by email in request).
     """
 
-    # Check if MFA already enabled
-    if current_user.mfa_secret:
+    # get target user
+    db_user = db.query(models.User).filter(models.User.email == req.email).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # if already enabled
+    if db_user.mfa_secret:
         raise HTTPException(status_code=400, detail="MFA already enabled for this user")
 
-    # Generate a new MFA secret
+    # generate secret + URI
     mfa_secret = pyotp.random_base32()
     totp = pyotp.TOTP(mfa_secret)
-    provisioning_uri = totp.provisioning_uri(current_user.email, issuer_name="Honeycomb DL")
+    provisioning_uri = totp.provisioning_uri(req.email, issuer_name="Honeycomb DL")
 
-    # Generate QR code (Base64-encoded PNG)
+    # QR image
     qr_img = qrcode.make(provisioning_uri)
     buf = BytesIO()
     qr_img.save(buf, format='PNG')
     qr_base64 = base64.b64encode(buf.getvalue()).decode()
 
-    # Store the new MFA secret in DB
-    db_user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    # store secret
     db_user.mfa_secret = mfa_secret
     db.commit()
 
     return {
         "message": "MFA enabled successfully",
-        "email": current_user.email,
+        "email": req.email,
         "mfa_secret": mfa_secret,
         "mfa_uri": provisioning_uri,
         "mfa_qr_base64_png": f"data:image/png;base64,{qr_base64}"
     }
+
     
 
 @app.post("/downlink/mfa/status", summary="To check mfa status")
