@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, status, Path, Request, Depends, Body
 from fastapi.responses import JSONResponse
 import event_fetcher_parse as efp
 import User_token
+from SMTP_init import LoginAlertMailer
 from pydantic import BaseModel, Field, field_validator, EmailStr
 from pydantic import FieldValidationInfo
 from fastapi.exceptions import RequestValidationError
@@ -212,6 +213,55 @@ def disable_mfa(body: MFADisableRequest, current_user = Depends(auth.get_current
 
     return {"status":"ok","message":"MFA disabled successfully"}
 
+# APIs for login alerts and notifications can be added here
+@app.post("/downlink/login-alert", summary="Set login alert email")
+def set_login_alert_email(email: EmailStr, current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    """
+    Sets the login alert email for the currently authenticated user.
+    """
+    user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    user.login_alert_email = email
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "status": "success",
+        "message": f"Login alert email set to {email}"
+    }
+
+@app.get("/downlink/login-alert", summary="Get login alert email")
+def get_login_alert_email(current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    """
+    Retrieves the login alert email for the currently authenticated user.
+    """
+    user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    if not user.login_alert_email:
+        return {
+            "status": "info",
+            "message": "No login alert email set."
+        }
+
+    return {
+        "status": "success",
+        "login_alert_email": user.login_alert_email
+    }
+
+@app.post("/downlink/send_login-alert", summary="Send login alert email")
+def send_login_alert(current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    """
+    Sends a login alert email to the user's configured email address.
+    """
+    user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    if not user.login_alert_email:
+        raise HTTPException(status_code=400, detail="No login alert email set.")
+
+    mailer = LoginAlertMailer()
+    mailer.send_alert(user.login_alert_email)
+
+    return {
+        "status": "success",
+        "message": f"Login alert email sent to {user.login_alert_email}"
+    }
 
 @app.get("/downlink/me", response_model=schemas.UserResponse)
 def read_users_me(current_user = Depends(auth.get_current_user)):
