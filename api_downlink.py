@@ -50,7 +50,6 @@ def get_db():
     finally:
         db.close()
 
-'''
 @app.post("/downlink/register", response_model=schemas.UserResponse)
 def register(user: schemas.UserCreate,current_user = Depends(auth.get_current_user) ,db: Session = Depends(get_db)):
     
@@ -64,42 +63,55 @@ def register(user: schemas.UserCreate,current_user = Depends(auth.get_current_us
     db.commit()
     db.refresh(new_user)
     return new_user
-'''
-@app.post("/downlink/register")
-def register(user: schemas.UserCreate,current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
-    
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
 
-    hashed_password = auth.get_password_hash(user.secret)
+@app.post("/downlink/mfa/enable", summary="Enable MFA for existing user")
+def enable_mfa(current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    """
+    Enables MFA for the currently authenticated user.
+    Generates a new MFA secret, stores it in DB, and returns the provisioning URI and QR code.
+    """
 
-    # === generate mfa secret ===
+    # Check if MFA already enabled
+    if current_user.mfa_secret:
+        raise HTTPException(status_code=400, detail="MFA already enabled for this user")
+
+    # Generate a new MFA secret
     mfa_secret = pyotp.random_base32()
     totp = pyotp.TOTP(mfa_secret)
-    provisioning_uri = totp.provisioning_uri(user.email, issuer_name="Honeycomb DL")
+    provisioning_uri = totp.provisioning_uri(current_user.email, issuer_name="Honeycomb DL")
 
-    # generate QR
+    # Generate QR code (Base64-encoded PNG)
     qr_img = qrcode.make(provisioning_uri)
     buf = BytesIO()
     qr_img.save(buf, format='PNG')
     qr_base64 = base64.b64encode(buf.getvalue()).decode()
 
-    new_user = models.User(
-        email=user.email,
-        secret=hashed_password,
-        mfa_secret=mfa_secret
-    )
-    db.add(new_user)
+    # Store the new MFA secret in DB
+    db_user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    db_user.mfa_secret = mfa_secret
     db.commit()
-    db.refresh(new_user)
 
     return {
-        "id": new_user.id,
-        "email": new_user.email,
-        "mfa_secret": mfa_secret,   
+        "message": "MFA enabled successfully",
+        "email": current_user.email,
+        "mfa_secret": mfa_secret,
         "mfa_uri": provisioning_uri,
         "mfa_qr_base64_png": f"data:image/png;base64,{qr_base64}"
+    }
+    
+
+@app.post("/downlink/mfa/status", summary="To check mfa status")
+def status_mfa(current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    """
+    Returns whether MFA is enabled for the currently authenticated user.
+    """
+
+    is_enabled = bool(current_user.mfa_secret)
+
+    return {
+        "email": current_user.email,
+        "mfa_enabled": is_enabled,
+        "message": "MFA is enabled" if is_enabled else "MFA is disabled"
     }
 
 class LoginRequest(BaseModel):
