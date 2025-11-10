@@ -74,3 +74,8 @@ Domain = "GRSE"
 AES_KEY = b"n2342dwwendwejnwedwjkdnwedne2dxn"
 LOGIN_AESGCM_KEY = b"bR7xZ1qP8eWn4vFVS23KY92MuXqGdEL0"
 
+# SMTP Configuration
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_USERNAME = "mihir.rayadurgam2002@gmail.com"
+SMTP_PASSWORD = "flng qger blhv pnph"
