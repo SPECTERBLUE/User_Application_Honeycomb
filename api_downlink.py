@@ -275,6 +275,28 @@ def send_login_alert(current_user = Depends(auth.get_current_user), db: Session 
         "message": f"Login alert email sent to {user.login_alert_email}"
     }
 
+@app.post("/downlink/disable_login-alert", summary="Disable login alert email")
+def disable_login_alert(current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    """
+    Disables the login alert email for the currently authenticated user.
+    """
+    user = db.query(models.User).filter(models.User.id == current_user.id).first()
+
+    if not user.login_alert_email:
+        return {
+            "status": "info",
+            "message": "Login alert email is already disabled."
+        }
+
+    user.login_alert_email = None
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "status": "success",
+        "message": "Login alert email has been disabled."
+    }
+
 @app.get("/downlink/me", response_model=schemas.UserResponse)
 def read_users_me(current_user = Depends(auth.get_current_user)):
     return current_user

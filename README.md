@@ -253,3 +253,45 @@ If successful, the new column mfa_secret will be added to the users table.
 
 
 You’ve successfully completed the Alembic migration setup and applied your first migration.
+
+
+---------For second Migration for email alert column----------
+
+## 🧱 **1. Create a New Migration Revision**
+
+Now, generate a new migration file to add a new column to the users table:
+
+alembic revision -m "add loginalert email"
+
+This command will create a new file under **alembic/versions/**.
+
+---
+
+## ✏️ **2. Edit the Generated Revision**
+
+Open the newly created migration file under **alembic/versions/**, and replace its content with the following:
+
+def upgrade():
+    op.add_column('users', sa.Column('login_alert_email', sa.String(length=100), nullable=True))
+    pass
+
+
+def downgrade():
+    op.drop_column('users', 'login_alert_email')
+    pass
+
+This defines what happens when you apply (upgrade) or revert (downgrade) the migration.
+
+---
+
+## 🚀 **3. Apply the Migration**
+
+Run the migration to update your database schema:
+
+alembic upgrade head
+
+If successful, the new column login_alert_email will be added to the users table.
+
+---
+
+You’ve successfully completed the Alembic Second migration.
