@@ -241,6 +241,29 @@ def set_login_alert_email(email: EmailStr, current_user = Depends(auth.get_curre
         "message": f"Login alert email set to {email}"
     }
 
+class LoginAlertEmailAddUserReq(BaseModel):
+    default_email : EmailStr
+    email: EmailStr
+
+@app.post("/downlink/register-login-alert-email-adduser", summary="Set login alert email at add user when admin adds a new user")
+def set_login_alert_email(body: LoginAlertEmailAddUserReq, current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    """
+    Sets the login alert email for the new user being added by the admin.
+    """
+    admin = db.query(models.User).filter(models.User.id == current_user.id).first()
+    if not admin:
+        raise HTTPException(status_code=404, detail="Admin user not found")
+    
+    user = db.query(models.User).filter(models.User.email == body.default_email).first()
+    user.login_alert_email = body.email
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "status": "success",
+        "message": f"Login alert email set to {body.email} for user {body.default_email}"
+    }
+    
 @app.get("/downlink/login-alert", summary="Get login alert email")
 def get_login_alert_email(current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     """
@@ -296,6 +319,9 @@ def disable_login_alert(current_user = Depends(auth.get_current_user), db: Sessi
         "status": "success",
         "message": "Login alert email has been disabled."
     }
+
+    
+# reset password by email li
 
 @app.get("/downlink/me", response_model=schemas.UserResponse)
 def read_users_me(current_user = Depends(auth.get_current_user)):
