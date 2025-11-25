@@ -445,7 +445,7 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
             timeout=10
         )
 
-        if response.status_code != 200:
+        if response.status_code != 201:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"User service error: {response.text}"
