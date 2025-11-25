@@ -79,3 +79,6 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_USERNAME = "mihir.rayadurgam2002@gmail.com"
 SMTP_PASSWORD = "flng qger blhv pnph"
+
+# reset password link
+FRONTEND_URL = "http://localhost:5173/auth"
