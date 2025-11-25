@@ -429,8 +429,9 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
     hashed_pw = auth.get_password_hash(req.new_password)
 
     # Update DB
-    user.password = hashed_pw
+    user.secret = hashed_pw
     db.commit()
+    db.refresh(user)
     
     # Payload for users service(magistrala )
     payload = {
