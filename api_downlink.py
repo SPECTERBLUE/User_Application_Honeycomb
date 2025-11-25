@@ -19,6 +19,7 @@ import json
 import os
 import logging
 import subprocess
+import requests
 import config
 import re
 import uuid
@@ -322,12 +323,66 @@ def disable_login_alert(current_user = Depends(auth.get_current_user), db: Sessi
     }
 
     
-# reset password by email li
+# reset password by email link
+
+def forgot_password_superset(email: EmailStr, new_password: str):
+
+    # Superset password reset Python script executed inside container
+    superset_password_change_script = """
+from superset import create_app
+from superset.extensions import db, security_manager
+import sys
+
+email = sys.argv[1]
+new_password = sys.argv[2]
+
+app = create_app()
+with app.app_context():
+    user = security_manager.find_user(email=email)
+    if not user:
+        print("USER_NOT_FOUND")
+        sys.exit(1)
+
+    security_manager.reset_password(user.id, new_password)
+    db.session.commit()
+    print("PASSWORD_UPDATED")
+"""
+
+    # Execute inside superset_app container
+    result = subprocess.run(
+        [
+            "docker", "exec", "superset_app",
+            "python3", "-c", superset_password_change_script,
+            email, new_password
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    stdout = result.stdout.strip()
+
+    if "PASSWORD_UPDATED" in stdout:
+        return {
+            "status": "success",
+            "message": f"Password updated for '{email}'."
+        }
+
+    if "USER_NOT_FOUND" in stdout:
+        raise HTTPException(
+            status_code=404,
+            detail=f"User '{email}' not found in Superset."
+        )
+
+    raise HTTPException(
+        status_code=500,
+        detail=f"Unexpected error: {stdout or result.stderr}"
+    )
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr   # account email (primary login email)
 
 
-@app.post("/auth/forgot-password", summary="Send reset link to login-alert email")
+@app.post("/downlink/forgot-password", summary="Send reset link to login-alert email")
 def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     # Find user by primary account email
     user = db.query(models.User).filter(models.User.email == req.email).first()
@@ -358,7 +413,7 @@ class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
 
-@app.post("/auth/reset-password-forgotpass", summary="Reset account password using token")
+@app.post("/downlink/reset-password-forgotpass", summary="Reset account password using token")
 def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
     # Validate token
     email = verify_reset_token(req.token)
@@ -376,7 +431,34 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
     # Update DB
     user.password = hashed_pw
     db.commit()
+    
+    # Payload for users service(magistrala )
+    payload = {
+        "email_id": email,
+        "password": req.new_password  
+    }
 
+    try:
+        response = requests.post(
+            "http://localhost:9002/users/reset-without-token",
+            json=payload,
+            timeout=10
+        )
+
+        if response.status_code != 201:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"User service error: {response.text}"
+            )
+
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"User service unreachable: {str(e)}"
+        )
+    
+    forgot_password_superset(email, req.new_password)
+    
     return {"message": "Password updated successfully"}
 
 
