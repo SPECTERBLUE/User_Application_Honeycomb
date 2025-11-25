@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from auth import models,schemas,database,auth
+from forgot_password import generate_reset_token, verify_reset_token
 from typing import Optional
 import pyotp
 import qrcode
@@ -322,6 +323,62 @@ def disable_login_alert(current_user = Depends(auth.get_current_user), db: Sessi
 
     
 # reset password by email li
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr   # account email (primary login email)
+
+
+@app.post("/auth/forgot-password", summary="Send reset link to login-alert email")
+def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    # Find user by primary account email
+    user = db.query(models.User).filter(models.User.email == req.email).first()
+    
+    if not user:
+        return {"message": "If this email exists, a password reset link has been sent."}
+
+    # Check if login-alert email is set
+    if not user.login_alert_email:
+        raise HTTPException(
+            status_code=400,
+            detail="Login alert email not set for this user."
+        )
+
+    # Generate reset token
+    token = generate_reset_token(req.email)
+
+    # Reset link 
+    reset_link = f"{config.FRONTEND_URL}/forgot-password?token={token}"
+
+    # Send email 
+    mailer = LoginAlertMailer()
+    mailer.send_password_reset(user.login_alert_email, reset_link)
+
+    return {"message": "If this email exists, a password reset link has been sent."}
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+@app.post("/auth/reset-password-forgotpass", summary="Reset account password using token")
+def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    # Validate token
+    email = verify_reset_token(req.token)
+    if not email:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+
+    # Find user
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Hash password
+    hashed_pw = auth.get_password_hash(req.new_password)
+
+    # Update DB
+    user.password = hashed_pw
+    db.commit()
+
+    return {"message": "Password updated successfully"}
+
 
 @app.get("/downlink/me", response_model=schemas.UserResponse)
 def read_users_me(current_user = Depends(auth.get_current_user)):
