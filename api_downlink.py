@@ -382,7 +382,7 @@ class ForgotPasswordRequest(BaseModel):
     email: EmailStr   # account email (primary login email)
 
 
-@app.post("/auth/forgot-password", summary="Send reset link to login-alert email")
+@app.post("/downlink/forgot-password", summary="Send reset link to login-alert email")
 def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     # Find user by primary account email
     user = db.query(models.User).filter(models.User.email == req.email).first()
@@ -413,7 +413,7 @@ class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
 
-@app.post("/auth/reset-password-forgotpass", summary="Reset account password using token")
+@app.post("/downlink/reset-password-forgotpass", summary="Reset account password using token")
 def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
     # Validate token
     email = verify_reset_token(req.token)
