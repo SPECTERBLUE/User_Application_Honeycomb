@@ -227,6 +227,63 @@ def disable_mfa(body: MFADisableRequest, current_user = Depends(auth.get_current
 
     return {"status":"ok","message":"MFA disabled successfully"}
 
+#mfa reset by email link
+class forgot_mfa_request(BaseModel):
+    email: EmailStr   # account email (primary login email)
+    
+@app.post("/downlink/forgot-mfa", summary="Send reset link to login-alert email for MFA reset")
+def forgot_mfa(req: forgot_mfa_request, db: Session = Depends(get_db)):
+    # Find user by primary account email
+    user = db.query(models.User).filter(models.User.email == req.email).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found."
+        )
+
+    # Check if login-alert email is set
+    if not user.login_alert_email:
+        raise HTTPException(
+            status_code=400,
+            detail="Login alert email not set for this user."
+        )
+
+    # Generate reset token
+    token = generate_reset_token(req.email)
+
+    # Reset link 
+    reset_link = f"{config.FRONTEND_URL}/forgot-mfa?token={token}"
+
+    # Send email 
+    mailer = LoginAlertMailer()
+    mailer.send_mfa_reset(user.login_alert_email, reset_link)
+
+    return {"message": "If this email exists, an MFA reset link has been sent."}
+
+class reset_mfa_request(BaseModel):
+    token: str
+
+@app.post("/downlink/reset-mfa-forgotpass", summary="Reset MFA using token")
+def reset_mfa_email(req: reset_mfa_request, db: Session = Depends(get_db)):
+
+    # Validate token
+    email = verify_reset_token(req.token)
+    if not email:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+
+    # Find user
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Reset MFA
+    user.mfa_secret = None
+    db.commit()
+    db.refresh(user)
+
+    return {"message": "MFA has been reset. You can now enable it again from your account settings."}
+    
 # APIs for login alerts and notifications can be added here
 @app.post("/downlink/login-alert", summary="Set login alert email")
 def set_login_alert_email(email: EmailStr, current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
@@ -388,7 +445,10 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == req.email).first()
     
     if not user:
-        return {"message": "If this email exists, a password reset link has been sent."}
+        raise HTTPException(
+            status_code=404,
+            detail="User not found."
+        )
 
     # Check if login-alert email is set
     if not user.login_alert_email:
