@@ -82,3 +82,6 @@ SMTP_PASSWORD = "flng qger blhv pnph"
 
 # reset password link
 FRONTEND_URL = "http://localhost:5173/auth"
+
+#semetric cyphering or asymmetric
+SYMETRIC_CYPHERING = True
