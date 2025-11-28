@@ -473,6 +473,11 @@ class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
 
+password_pattern = re.compile(
+    r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)"
+    r"(?=.*[!@#$%^&*()_\-+=\[{\]};:'\",<.>/?\\|`~]).{8,}$"
+)
+
 @app.post("/downlink/reset-password-forgotpass", summary="Reset account password using token")
 def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
     # Validate token
@@ -480,23 +485,41 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
     if not email:
         raise HTTPException(status_code=400, detail="Invalid or expired token")
 
+    new_pw = req.new_password
+
+    # 1) Check regex
+    if not password_pattern.match(new_pw):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Password must be at least 8 characters long and include at least one lowercase "
+                "letter, one uppercase letter, one digit, and one special character."
+            )
+        )
+
+    # 2) Ensure password does NOT contain email username (before @)
+    local_part = email.split("@")[0].lower()
+    if local_part in new_pw.lower():
+        raise HTTPException(
+            status_code=400,
+            detail="Password must not contain your email username."
+        )
+
     # Find user
     user = db.query(models.User).filter(models.User.email == email).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Hash password
-    hashed_pw = auth.get_password_hash(req.new_password)
-
-    # Update DB
+    # Hash and update
+    hashed_pw = auth.get_password_hash(new_pw)
     user.secret = hashed_pw
     db.commit()
     db.refresh(user)
-    
-    # Payload for users service(magistrala )
+
+    # Push to Magistrala service
     payload = {
         "email_id": email,
-        "password": req.new_password  
+        "password": new_pw
     }
 
     try:
@@ -505,23 +528,20 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
             json=payload,
             timeout=10
         )
-
         if response.status_code != 201:
             raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
+                status_code=502,
                 detail=f"User service error: {response.text}"
             )
-
     except requests.exceptions.RequestException as e:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=503,
             detail=f"User service unreachable: {str(e)}"
         )
-    
-    forgot_password_superset(email, req.new_password)
-    
-    return {"message": "Password updated successfully"}
 
+    forgot_password_superset(email, new_pw)
+
+    return {"message": "Password updated successfully"}
 
 @app.get("/downlink/me", response_model=schemas.UserResponse)
 def read_users_me(current_user = Depends(auth.get_current_user)):
