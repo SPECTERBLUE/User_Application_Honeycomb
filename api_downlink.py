@@ -543,6 +543,58 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
 
     return {"message": "Password updated successfully"}
 
+# set to symmetric cyphering or asymmetric cyphering
+
+CONFIG_FILE = "config.py"
+
+class Cymetric_body(BaseModel):
+    symetric: bool = Field(..., description="True for symmetric cyphering, False for asymmetric cyphering")
+    identity: dict
+    secret: dict
+
+@app.post("/downlink/symetric-cyphering", summary="Set symmetric or asymmetric cyphering")
+def set_cyphering_method(cymeric:Cymetric_body,current_user = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+    try:
+        username = decrypt_aes_gcm_downlink_login(cymeric.identity)
+        password = decrypt_aes_gcm_downlink_login(cymeric.secret)
+        if not username or not password:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid encrypted credentials")
+
+        # 4. Authenticate
+        user = auth.authenticate_user(db, username, password)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials. Request a new captcha.")
+    
+        # Update in-memory
+        config.SYMETRIC_CYPHERING = cymeric.symetric
+
+        # Read file
+        with open(CONFIG_FILE, "r") as f:
+            content = f.read()
+
+        # Replace the value in file
+        new_content = re.sub(
+            r"SYMETRIC_CYPHERING\s*=\s*(True|False)",
+            f"SYMETRIC_CYPHERING = {cymeric.symetric}",
+            content
+        )
+
+        # Write back to file
+        with open(CONFIG_FILE, "w") as f:
+            f.write(new_content)
+
+        return {
+            "status": "success",
+            "message": f"Cyphering method permanently set to {'symmetric' if cymeric.symetric else 'asymmetric'}",
+            "persisted_value": cymeric.symetric
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to persist cyphering method: {str(e)}"
+        )
+
 @app.get("/downlink/me", response_model=schemas.UserResponse)
 def read_users_me(current_user = Depends(auth.get_current_user)):
     return current_user
