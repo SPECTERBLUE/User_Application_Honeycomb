@@ -120,7 +120,7 @@ class SharedKey:
 class SensorCrypto:
     """Handles encryption and decryption of data using AES (CBC mode)."""
     
-    def __init__(self, shared_secret_hex: str):
+    def __init__(self, shared_secret_hex: str, iv_dev):
         """
         Initialize encryption with a derived shared secret.
 
@@ -129,7 +129,7 @@ class SensorCrypto:
         try:
             logging.debug("Initializing SensorCrypto with shared secret.")
             self.shared_secret = bytes.fromhex(shared_secret_hex) # Use only the first 16 bytes
-            self.iv = bytes([0] * 16)  # Initialization Vector (IV) set to zero
+            self.iv = bytes.fromhex(iv_dev) if iv_dev else None # Initialization Vector (IV) set to device-specific value
 
             logging.info("SensorCrypto successfully initialized.")
         except Exception as e:
