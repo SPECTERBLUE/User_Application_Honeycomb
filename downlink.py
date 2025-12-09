@@ -199,8 +199,19 @@ def process_downlink_packet(packet: str):
                 logging.info(f"Reassembled ED public key for device {dev_eui}: {new_ed_pub}")
         else:
             if data_ascii.startswith("PUBKEY:"):
-                new_ed_pub = data_ascii[7:]
-                logging.info(f"ED public key update received for device {dev_eui}: {new_ed_pub}")
+                try:
+                    # Split by ':IV:' to separate PUBKEY and IV
+                    parts = data_ascii.split(":IV:")
+                    print(f"Parts after split: {parts}")
+                    # new_ed_pub = parts[0][7:].strip()  # Extract PUBKEY (skip 'PUBKEY:')
+                    new_ed_pub = parts[0][7:].replace("PUBKEY:", "", 1).strip()
+                    iv_dev = parts[1].strip() if len(parts) > 1 else None  # Extract IV if present
+
+                    logging.info(f"ED public key update received for device {dev_eui}: {new_ed_pub}")
+                    if iv_dev:
+                        logging.info(f"IV update received for device {dev_eui}: {iv_dev}")
+                except Exception as e:
+                    logging.error(f"Failed to parse PUBKEY/IV for device {dev_eui}: {e}")
 
         if new_ed_pub and len(new_ed_pub) == 130:
             device_public_keys[dev_eui] = new_ed_pub
@@ -210,13 +221,14 @@ def process_downlink_packet(packet: str):
                 logging.info(f"Generated shared key for device {dev_eui}: {sk}")
                 logging.info(f"Derived shared secret for device {dev_eui}: {shared_secret}")  # Convert bytes to hex for logging
                 
-                device_crypto[dev_eui] = SensorCrypto(sk.get_shared_secret())
+                device_crypto[dev_eui] = SensorCrypto(sk.get_shared_secret(), iv_dev)
                 logging.info(f"Initialized SensorCrypto for device {dev_eui}: {device_crypto[dev_eui]}")
             except Exception as e:
                 logging.error(f"Error updating shared secret for device {dev_eui}: {e}", exc_info=True)
         else:
             logging.warning(f"Invalid ED public key length for device {dev_eui}: {len(new_ed_pub) // 2} bytes")
 
+        
     else:
         # Assume sensor data on FPorts 1–25.
         if dev_eui not in device_crypto:
