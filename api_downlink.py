@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from auth import models,schemas,database,auth
 from forgot_password import generate_reset_token, verify_reset_token
 from typing import Optional
+from Predictive_ML import fetch_assets_telemetry
+from Predictive_ML import telemetry_processor
 import pyotp
 import qrcode
 import base64
@@ -545,6 +547,41 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
 
 # set to symmetric cyphering or asymmetric cyphering
 
+@app.post("/downlink/chirpstack-data", summary="Sending data decripted from chirpstack using symetric cyphering, also converting the json format of the data to senml format")
+async def chirpstack_data(data: Request):
+    
+    try:
+        '''retrive incoming headers and body data'''
+        headers = data.headers
+        body = await data.body()
+        logger.info(f"Received headers: {headers}")
+        logger.info(f"Received body: {body}")
+        
+        for key, value in headers.items():
+            logger.info(f"Header: {key} = {value}")
+            
+        # Get Device-Type header (case-insensitive)
+        device_type = headers.get("device-type")
+
+        if not device_type:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Device-Type header missing"
+            )
+
+        logger.info(f"Device-Type: {device_type}")
+        
+        
+    except Exception as e:
+        logger.error(f"Error reading request data: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request data"
+        )    
+
+
+        
+#####################################################################################################        
 CONFIG_FILE = "config.py"
 
 class Cymetric_body(BaseModel):
@@ -1639,3 +1676,118 @@ async def verify_captcha(request: CaptchaVerifyRequest, auth: str = Depends(auth
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal Server Error: " + str(e)
         )
+
+##############################################################################################
+# predictive maintainance apis below
+##############################################################################################
+
+class AssetTelemetryRequest(BaseModel):
+    asset_id: str
+    window_length: int = Field(
+        ...,
+        gt=0,
+        description="Window length in seconds for aggregation"
+    )
+    
+@app.post(
+    "/downlink/predictive_ML/assets/telemetry",
+    summary="Fetch telemetry data for an asset"
+)
+def get_asset_telemetry(
+    payload: AssetTelemetryRequest,
+    current_user = Depends(auth.get_current_user)
+):
+    """
+    Fetches telemetry data for a given asset ID and aggregates it
+    using the provided window length.
+    """
+
+    asset_id = payload.asset_id
+    window_length = payload.window_length
+
+    try:
+        telemetry_fetcher = fetch_assets_telemetry.FetchAssetsTelemetry()
+        telemetry_data = telemetry_fetcher.get_telemetry_data_asset(asset_id)
+
+        if telemetry_data is None:
+            return {
+                "status": "error",
+                "message": "Failed to fetch telemetry data for the asset."
+            }
+
+        # 🔹 Process telemetry
+        processor = telemetry_processor.TelemetryProcessor(telemetry_data)
+        processed_data = processor.aggregate_window(
+            window_size_sec=window_length
+        )
+
+        return {
+            "status": "success",
+            "asset_id": asset_id,
+            "window_length": window_length,
+            "count": len(processed_data),
+            "data": processed_data
+        }
+
+    except Exception as e:
+        logging.error(f"Error fetching telemetry for asset {asset_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while processing telemetry data."
+        )
+class ThingTelemetryRequest(BaseModel):
+    thing_id: str
+    asset_id: str
+    window_length: int = Field(
+        ...,
+        gt=0,
+        description="Window length in seconds for aggregation"
+    )
+    
+@app.post(
+    "/downlink/predictive_ML/things/telemetry",
+    summary="Fetch telemetry data for a thing within an asset"
+)
+def get_thing_telemetry(
+    payload: ThingTelemetryRequest,
+    current_user = Depends(auth.get_current_user)
+):
+    """
+    Fetches all telemetry data for a given thing ID within a specified asset ID.
+    """
+
+    thing_id = payload.thing_id
+    asset_id = payload.asset_id
+    window_length = payload.window_length
+
+    try:
+        telemetry_fetcher = fetch_assets_telemetry.FetchAssetsTelemetry()
+        telemetry_data = telemetry_fetcher.get_telemetry_data_things(thing_id, asset_id)
+
+        if telemetry_data is None:
+            return {
+                "status": "error",
+                "message": "Failed to fetch telemetry data for the thing."
+            }
+        
+        # process telemetry
+        processor = telemetry_processor.TelemetryProcessor(telemetry_data)
+        processed_data_thing = processor.aggregate_window(
+            window_size_sec=window_length
+        )
+
+        return {
+            "status": "success",
+            "thing_id": thing_id,
+            "asset_id": asset_id,
+            "count": len(telemetry_data),
+            "data": processed_data_thing
+        }
+
+    except Exception as e:
+        logging.error(f"Error fetching telemetry for thing {thing_id} in asset {asset_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while fetching telemetry data."
+        )
+
