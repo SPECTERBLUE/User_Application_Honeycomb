@@ -167,5 +167,3 @@ class FetchAssetsTelemetry:
                 f"Error fetching telemetry data for thing {thing_id}, asset {asset_id}: {e}"
             )
             return None
-
-            

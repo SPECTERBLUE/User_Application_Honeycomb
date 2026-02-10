@@ -28,21 +28,31 @@ class TelemetryProcessor:
 
     def aggregate_window(self, window_size_sec):
         """
-        Example: average values per time window per sensor
+        Aggregates telemetry into fixed time windows per sensor.
+        Output is ML- and CSV-friendly.
         """
-        
+
         buckets = defaultdict(list)
 
         for msg in self.telemetry_data:
-            window = msg["time"] // window_size_sec
-            key = (msg["name"], window)
-            buckets[key].append(msg["value"])
+            try:
+                window_start = (msg["time"] // window_size_sec) * window_size_sec
+                key = (msg["name"], window_start)
+                buckets[key].append(msg["value"])
+            except KeyError:
+                logging.warning(f"Skipping malformed message: {msg}")
 
-        return [
-            {
-                "sensor": k[0],
-                "window": k[1],
-                "avg": sum(v) / len(v)
-            }
-            for k, v in buckets.items()
-        ]
+        aggregated = []
+
+        for (sensor, window_start), values in buckets.items():
+            aggregated.append({
+                "sensor": sensor,
+                "window_start": window_start,
+                "count": len(values),
+                "avg": sum(values) / len(values),
+                "min": min(values),
+                "max": max(values)
+            })
+
+        return aggregated
+

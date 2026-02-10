@@ -13,6 +13,9 @@ from forgot_password import generate_reset_token, verify_reset_token
 from typing import Optional
 from Predictive_ML import fetch_assets_telemetry
 from Predictive_ML import telemetry_processor
+from Predictive_ML.training_dataset_csv_creation import (
+    create_training_dataset_csv
+)
 import pyotp
 import qrcode
 import base64
@@ -1721,13 +1724,21 @@ def get_asset_telemetry(
             window_size_sec=window_length
         )
 
+        dataset_path = create_training_dataset_csv(
+            processed_data=processed_data,
+            asset_id=asset_id,
+            window_length=window_length
+        )
+        
         return {
             "status": "success",
             "asset_id": asset_id,
             "window_length": window_length,
             "count": len(processed_data),
+            "dataset_path": dataset_path,
             "data": processed_data
         }
+
 
     except Exception as e:
         logging.error(f"Error fetching telemetry for asset {asset_id}: {e}")
