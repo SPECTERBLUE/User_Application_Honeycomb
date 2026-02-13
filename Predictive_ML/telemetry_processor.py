@@ -1,4 +1,4 @@
-
+from collections import defaultdict
 import logging
 from collections import defaultdict
 
@@ -56,3 +56,46 @@ class TelemetryProcessor:
 
         return aggregated
 
+MAX_FORWARD_FILL_WINDOWS = 3
+
+def handle_missing_windows(processed_data: list):
+    """
+    Applies forward fill for <= 3 missing windows.
+    Marks sensor as NOT_WORKING if missing > 3 windows.
+    """
+
+    by_sensor = defaultdict(list)
+
+    # Group by sensor
+    for row in processed_data:
+        by_sensor[row["sensor"]].append(row)
+
+    final_data = []
+
+    for sensor, rows in by_sensor.items():
+        rows = sorted(rows, key=lambda x: x["window"])
+
+        last_valid = None
+        missing_count = 0
+        sensor_failed = False
+
+        for row in rows:
+            if row["avg"] is not None and not sensor_failed:
+                last_valid = row["avg"]
+                missing_count = 0
+                row["status"] = "OK"
+
+            else:
+                missing_count += 1
+
+                if missing_count <= MAX_FORWARD_FILL_WINDOWS and last_valid is not None:
+                    row["avg"] = last_valid
+                    row["status"] = "FILLED"
+                else:
+                    row["avg"] = None
+                    row["status"] = "NOT_WORKING"
+                    sensor_failed = True
+
+            final_data.append(row)
+
+    return final_data
