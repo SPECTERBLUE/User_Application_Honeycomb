@@ -99,3 +99,29 @@ def handle_missing_windows(processed_data: list):
             final_data.append(row)
 
     return final_data
+
+def label_data(aggregated_data, threshold_map):
+    labeled = []
+
+    for row in aggregated_data:
+        sensor = row["sensor"]
+        value = row["avg"]
+
+        label = "NORMAL"
+
+        if sensor in threshold_map:
+            pf = threshold_map[sensor]["prefailure"]
+            fl = threshold_map[sensor]["failure"]
+
+            if value >= fl:
+                label = "POSTFAILURE"
+            elif value >= pf:
+                label = "PREFAILURE"
+
+        labeled.append({
+            **row,
+            "label": label
+        })
+
+    return labeled
+

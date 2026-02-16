@@ -1684,6 +1684,14 @@ async def verify_captcha(request: CaptchaVerifyRequest, auth: str = Depends(auth
 # predictive maintainance apis below
 ##############################################################################################
 
+# ------------------ REQUEST MODELS ------------------ #
+
+class ThresholdConfig(BaseModel):
+    sensor: str
+    prefailure: float
+    failure: float
+
+
 class AssetTelemetryRequest(BaseModel):
     asset_id: str
     window_length: int = Field(
@@ -1691,24 +1699,33 @@ class AssetTelemetryRequest(BaseModel):
         gt=0,
         description="Window length in seconds for aggregation"
     )
-    
+    thresholds: list[ThresholdConfig]
+
+
+# ------------------ API ------------------ #
+
 @app.post(
     "/downlink/predictive_ML/assets/telemetry",
-    summary="Fetch telemetry data for an asset"
+    summary="Fetch telemetry, aggregate, label and generate training CSV"
 )
 def get_asset_telemetry(
     payload: AssetTelemetryRequest,
-    current_user = Depends(auth.get_current_user)
+    current_user=Depends(auth.get_current_user)
 ):
-    """
-    Fetches telemetry data for a given asset ID and aggregates it
-    using the provided window length.
-    """
 
     asset_id = payload.asset_id
     window_length = payload.window_length
 
     try:
+        # 🔹 Convert threshold list → fast lookup dict
+        threshold_map = {
+            t.sensor: {
+                "prefailure": t.prefailure,
+                "failure": t.failure
+            }
+            for t in payload.thresholds
+        }
+
         telemetry_fetcher = fetch_assets_telemetry.FetchAssetsTelemetry()
         telemetry_data = telemetry_fetcher.get_telemetry_data_asset(asset_id)
 
@@ -1718,34 +1735,50 @@ def get_asset_telemetry(
                 "message": "Failed to fetch telemetry data for the asset."
             }
 
-        # 🔹 Process telemetry
+        # 🔹 Aggregate
         processor = telemetry_processor.TelemetryProcessor(telemetry_data)
+
         processed_data = processor.aggregate_window(
             window_size_sec=window_length
         )
 
+        # 🔹 Handle missing windows (your existing logic)
+        processed_data = telemetry_processor.handle_missing_windows(
+            processed_data
+        )
+
+        # 🔹 Apply labeling
+        labeled_data = telemetry_processor.label_data(
+            aggregated_data=processed_data,
+            threshold_map=threshold_map
+        )
+
+        # 🔹 Store CSV for ML training
         dataset_path = create_training_dataset_csv(
-            processed_data=processed_data,
+            processed_data=labeled_data,
             asset_id=asset_id,
             window_length=window_length
         )
-        
+
         return {
             "status": "success",
             "asset_id": asset_id,
             "window_length": window_length,
-            "count": len(processed_data),
+            "count": len(labeled_data),
             "dataset_path": dataset_path,
-            "data": processed_data
+            "data": labeled_data
         }
 
-
     except Exception as e:
-        logging.error(f"Error fetching telemetry for asset {asset_id}: {e}")
+        logging.error(
+            f"Error processing telemetry for asset {asset_id}: {e}",
+            exc_info=True
+        )
         raise HTTPException(
             status_code=500,
             detail="Internal server error while processing telemetry data."
         )
+
 class ThingTelemetryRequest(BaseModel):
     thing_id: str
     asset_id: str
