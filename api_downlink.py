@@ -5,6 +5,8 @@ import User_token
 from SMTP_init import LoginAlertMailer
 from pydantic import BaseModel, Field, field_validator, EmailStr
 from pydantic import FieldValidationInfo
+from pydantic import BaseModel, Field
+from typing import Literal, Optional, Dict
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -16,6 +18,9 @@ from Predictive_ML import telemetry_processor
 from Predictive_ML.training_dataset_csv_creation import (
     create_training_dataset_csv
 )
+from Predictive_ML.ml.train_service import TrainService
+from Predictive_ML.ml.model_store import load_model, delete_model, list_models
+from typing import List
 import pyotp
 import qrcode
 import base64
@@ -1834,4 +1839,141 @@ def get_thing_telemetry(
             status_code=500,
             detail="Internal server error while fetching telemetry data."
         )
+
+########################################################################
+# list of the csv files required for training
+########################################################################
+@app.get(
+    "/downlink/predictive_ML/datasets",
+    summary="List all available training CSV datasets"
+)
+def list_training_datasets(
+    current_user=Depends(auth.get_current_user)
+) -> dict:
+
+    try:
+        BASE_DATASET_DIR = "data/training_datasets"
+        if not os.path.exists(BASE_DATASET_DIR):
+            raise HTTPException(
+                status_code=404,
+                detail="Dataset directory not found"
+            )
+
+        files = [
+            f for f in os.listdir(BASE_DATASET_DIR)
+            if f.endswith(".csv")
+        ]
+
+        datasets: List[dict] = []
+
+        for file in files:
+            full_path = os.path.join(BASE_DATASET_DIR, file)
+
+            datasets.append({
+                "file_name": file,
+                "path": full_path,
+                "size_kb": round(os.path.getsize(full_path) / 1024, 2),
+                "last_modified": os.path.getmtime(full_path)
+            })
+
+        return {
+            "status": "success",
+            "dataset_dir": BASE_DATASET_DIR,
+            "count": len(datasets),
+            "datasets": datasets
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error listing datasets: {str(e)}"
+        )
+######################################################################
+# Model training and management APIs below
+######################################################################
+class TrainModelRequest(BaseModel):
+    model_name: str = Field(..., description="User-defined unique model name")
+    dataset_path: str
+    model_type: Literal["random_forest", "xgboost", "lstm"]
+    target_column: str = "label"
+
+
+@app.post("/downlink/predictive_ML/train", summary="Train ML model and store in Redis")
+async def train_model_api(
+    payload: TrainModelRequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        
+        # 🔹 prevent overwrite
+        existing_models = await list_models()
+        if payload.model_name in existing_models:
+            raise HTTPException(
+                status_code=400,
+                detail="Model name already exists"
+            )
+
+        train_service = TrainService()
+        result = train_service.train(
+            csv_path=payload.dataset_path,
+            target_column=payload.target_column,
+            user_model_name=payload.model_name,
+            algorithm=payload.model_type
+        )
+
+        return {
+            "status": "success",
+            "message": "Model trained and stored in Redis",
+            "model_name": payload.model_name,
+            "metrics": result["metrics"],
+            "metadata": result["metadata"]
+        }
+
+    except Exception as e:
+        logging.error(f"Model training failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Model training failed")
+
+############################################################################
+# Model store in redis using pickle for model and JSON for metadata. This allows storing complex ML models and their associated metadata efficiently.
+############################################################################
+
+@app.get("/downlink/predictive_ML/models", summary="List stored ML models")
+async def list_models(current_user=Depends(auth.get_current_user)):
+    
+    models = await list_models()
+
+    return {
+        "status": "success",
+        "models": models
+    }
+
+@app.get("/downlink/predictive_ML/models/{model_name}")
+async def get_model_metadata(
+    model_name: str,
+    current_user=Depends(auth.get_current_user)
+):
+    
+    model, metadata = await load_model(model_name)
+
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    return {
+        "status": "success",
+        "model_name": model_name,
+        "metadata": metadata
+    }
+    
+@app.delete("/downlink/predictive_ML/models/{model_name}")
+async def delete_model(
+    model_name: str,
+    current_user=Depends(auth.get_current_user)
+):
+    
+    await delete_model(model_name)
+
+    return {
+        "status": "success",
+        "message": f"Model '{model_name}' deleted"
+    }
 
