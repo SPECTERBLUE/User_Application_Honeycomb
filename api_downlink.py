@@ -5,12 +5,22 @@ import User_token
 from SMTP_init import LoginAlertMailer
 from pydantic import BaseModel, Field, field_validator, EmailStr
 from pydantic import FieldValidationInfo
+from pydantic import BaseModel, Field
+from typing import Literal, Optional, Dict
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from auth import models,schemas,database,auth
 from forgot_password import generate_reset_token, verify_reset_token
 from typing import Optional
+from Predictive_ML import fetch_assets_telemetry
+from Predictive_ML import telemetry_processor
+from Predictive_ML.training_dataset_csv_creation import (
+    create_training_dataset_csv
+)
+from Predictive_ML.ml.train_service import TrainService
+from Predictive_ML.ml.model_store import load_model, delete_model, list_models
+from typing import List
 import pyotp
 import qrcode
 import base64
@@ -545,6 +555,41 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
 
 # set to symmetric cyphering or asymmetric cyphering
 
+@app.post("/downlink/chirpstack-data", summary="Sending data decripted from chirpstack using symetric cyphering, also converting the json format of the data to senml format")
+async def chirpstack_data(data: Request):
+    
+    try:
+        '''retrive incoming headers and body data'''
+        headers = data.headers
+        body = await data.body()
+        logger.info(f"Received headers: {headers}")
+        logger.info(f"Received body: {body}")
+        
+        for key, value in headers.items():
+            logger.info(f"Header: {key} = {value}")
+            
+        # Get Device-Type header (case-insensitive)
+        device_type = headers.get("device-type")
+
+        if not device_type:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Device-Type header missing"
+            )
+
+        logger.info(f"Device-Type: {device_type}")
+        
+        
+    except Exception as e:
+        logger.error(f"Error reading request data: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request data"
+        )    
+
+
+        
+#####################################################################################################        
 CONFIG_FILE = "config.py"
 
 class Cymetric_body(BaseModel):
@@ -1639,3 +1684,296 @@ async def verify_captcha(request: CaptchaVerifyRequest, auth: str = Depends(auth
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal Server Error: " + str(e)
         )
+
+##############################################################################################
+# predictive maintainance apis below
+##############################################################################################
+
+# ------------------ REQUEST MODELS ------------------ #
+
+class ThresholdConfig(BaseModel):
+    sensor: str
+    prefailure: float
+    failure: float
+
+
+class AssetTelemetryRequest(BaseModel):
+    asset_id: str
+    window_length: int = Field(
+        ...,
+        gt=0,
+        description="Window length in seconds for aggregation"
+    )
+    thresholds: list[ThresholdConfig]
+
+
+# ------------------ API ------------------ #
+
+@app.post(
+    "/downlink/predictive_ML/assets/telemetry",
+    summary="Fetch telemetry, aggregate, label and generate training CSV"
+)
+def get_asset_telemetry(
+    payload: AssetTelemetryRequest,
+    current_user=Depends(auth.get_current_user)
+):
+
+    asset_id = payload.asset_id
+    window_length = payload.window_length
+
+    try:
+        # 🔹 Convert threshold list → fast lookup dict
+        threshold_map = {
+            t.sensor: {
+                "prefailure": t.prefailure,
+                "failure": t.failure
+            }
+            for t in payload.thresholds
+        }
+
+        telemetry_fetcher = fetch_assets_telemetry.FetchAssetsTelemetry()
+        telemetry_data = telemetry_fetcher.get_telemetry_data_asset(asset_id)
+
+        if telemetry_data is None:
+            return {
+                "status": "error",
+                "message": "Failed to fetch telemetry data for the asset."
+            }
+
+        # 🔹 Aggregate
+        processor = telemetry_processor.TelemetryProcessor(telemetry_data)
+
+        processed_data = processor.aggregate_window(
+            window_size_sec=window_length
+        )
+
+        # 🔹 Handle missing windows (your existing logic)
+        processed_data = telemetry_processor.handle_missing_windows(
+            processed_data
+        )
+
+        # 🔹 Apply labeling
+        labeled_data = telemetry_processor.label_data(
+            aggregated_data=processed_data,
+            threshold_map=threshold_map
+        )
+
+        # 🔹 Store CSV for ML training
+        dataset_path = create_training_dataset_csv(
+            processed_data=labeled_data,
+            asset_id=asset_id,
+            window_length=window_length
+        )
+
+        return {
+            "status": "success",
+            "asset_id": asset_id,
+            "window_length": window_length,
+            "count": len(labeled_data),
+            "dataset_path": dataset_path,
+            "data": labeled_data
+        }
+
+    except Exception as e:
+        logging.error(
+            f"Error processing telemetry for asset {asset_id}: {e}",
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while processing telemetry data."
+        )
+
+class ThingTelemetryRequest(BaseModel):
+    thing_id: str
+    asset_id: str
+    window_length: int = Field(
+        ...,
+        gt=0,
+        description="Window length in seconds for aggregation"
+    )
+    
+@app.post(
+    "/downlink/predictive_ML/things/telemetry",
+    summary="Fetch telemetry data for a thing within an asset"
+)
+def get_thing_telemetry(
+    payload: ThingTelemetryRequest,
+    current_user = Depends(auth.get_current_user)
+):
+    """
+    Fetches all telemetry data for a given thing ID within a specified asset ID.
+    """
+
+    thing_id = payload.thing_id
+    asset_id = payload.asset_id
+    window_length = payload.window_length
+
+    try:
+        telemetry_fetcher = fetch_assets_telemetry.FetchAssetsTelemetry()
+        telemetry_data = telemetry_fetcher.get_telemetry_data_things(thing_id, asset_id)
+
+        if telemetry_data is None:
+            return {
+                "status": "error",
+                "message": "Failed to fetch telemetry data for the thing."
+            }
+        
+        # process telemetry
+        processor = telemetry_processor.TelemetryProcessor(telemetry_data)
+        processed_data_thing = processor.aggregate_window(
+            window_size_sec=window_length
+        )
+
+        return {
+            "status": "success",
+            "thing_id": thing_id,
+            "asset_id": asset_id,
+            "count": len(telemetry_data),
+            "data": processed_data_thing
+        }
+
+    except Exception as e:
+        logging.error(f"Error fetching telemetry for thing {thing_id} in asset {asset_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while fetching telemetry data."
+        )
+
+########################################################################
+# list of the csv files required for training
+########################################################################
+@app.get(
+    "/downlink/predictive_ML/datasets",
+    summary="List all available training CSV datasets"
+)
+def list_training_datasets(
+    current_user=Depends(auth.get_current_user)
+) -> dict:
+
+    try:
+        BASE_DATASET_DIR = "data/training_datasets"
+        if not os.path.exists(BASE_DATASET_DIR):
+            raise HTTPException(
+                status_code=404,
+                detail="Dataset directory not found"
+            )
+
+        files = [
+            f for f in os.listdir(BASE_DATASET_DIR)
+            if f.endswith(".csv")
+        ]
+
+        datasets: List[dict] = []
+
+        for file in files:
+            full_path = os.path.join(BASE_DATASET_DIR, file)
+
+            datasets.append({
+                "file_name": file,
+                "path": full_path,
+                "size_kb": round(os.path.getsize(full_path) / 1024, 2),
+                "last_modified": os.path.getmtime(full_path)
+            })
+
+        return {
+            "status": "success",
+            "dataset_dir": BASE_DATASET_DIR,
+            "count": len(datasets),
+            "datasets": datasets
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error listing datasets: {str(e)}"
+        )
+######################################################################
+# Model training and management APIs below
+######################################################################
+class TrainModelRequest(BaseModel):
+    model_name: str = Field(..., description="User-defined unique model name")
+    dataset_path: str
+    model_type: Literal["random_forest", "xgboost", "lstm"]
+    target_column: str = "label"
+
+
+@app.post("/downlink/predictive_ML/train", summary="Train ML model and store in Redis")
+async def train_model_api(
+    payload: TrainModelRequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        
+        # 🔹 prevent overwrite
+        existing_models = await list_models()
+        if payload.model_name in existing_models:
+            raise HTTPException(
+                status_code=400,
+                detail="Model name already exists"
+            )
+
+        train_service = TrainService()
+        result = train_service.train(
+            csv_path=payload.dataset_path,
+            target_column=payload.target_column,
+            user_model_name=payload.model_name,
+            algorithm=payload.model_type
+        )
+
+        return {
+            "status": "success",
+            "message": "Model trained and stored in Redis",
+            "model_name": payload.model_name,
+            "metrics": result["metrics"],
+            "metadata": result["metadata"]
+        }
+
+    except Exception as e:
+        logging.error(f"Model training failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Model training failed")
+
+############################################################################
+# Model store in redis using pickle for model and JSON for metadata. This allows storing complex ML models and their associated metadata efficiently.
+############################################################################
+
+@app.get("/downlink/predictive_ML/models", summary="List stored ML models")
+async def list_models(current_user=Depends(auth.get_current_user)):
+    
+    models = await list_models()
+
+    return {
+        "status": "success",
+        "models": models
+    }
+
+@app.get("/downlink/predictive_ML/models/{model_name}")
+async def get_model_metadata(
+    model_name: str,
+    current_user=Depends(auth.get_current_user)
+):
+    
+    model, metadata = await load_model(model_name)
+
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    return {
+        "status": "success",
+        "model_name": model_name,
+        "metadata": metadata
+    }
+    
+@app.delete("/downlink/predictive_ML/models/{model_name}")
+async def delete_model(
+    model_name: str,
+    current_user=Depends(auth.get_current_user)
+):
+    
+    await delete_model(model_name)
+
+    return {
+        "status": "success",
+        "message": f"Model '{model_name}' deleted"
+    }
+
