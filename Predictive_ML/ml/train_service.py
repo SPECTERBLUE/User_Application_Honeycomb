@@ -1,6 +1,6 @@
-import os
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime
+from typing import Dict, Any
 
 from Predictive_ML.ml.trainers.random_forest import train_random_forest
 from Predictive_ML.ml.model_store import store_model
@@ -8,11 +8,7 @@ from Predictive_ML.ml.model_store import store_model
 
 class TrainService:
 
-    def __init__(self, model_dir: str = "saved_models"):
-        self.model_dir = model_dir
-        os.makedirs(self.model_dir, exist_ok=True)
-
-    def train(
+    async def train(
         self,
         csv_path: str,
         target_column: str,
@@ -20,12 +16,8 @@ class TrainService:
         algorithm: str = "random_forest",
         test_size: float = 0.2,
         random_state: int = 42
-    ):
-        """
-        Main training orchestration
-        """
+    ) -> Dict[str, Any]:
 
-        # Load dataset
         df = pd.read_csv(csv_path)
 
         if target_column not in df.columns:
@@ -34,7 +26,7 @@ class TrainService:
         X = df.drop(columns=[target_column])
         y = df[target_column]
 
-        # Select algorithm
+        # Train
         if algorithm == "random_forest":
             model, metrics = train_random_forest(
                 X, y, test_size=test_size, random_state=random_state
@@ -42,18 +34,27 @@ class TrainService:
         else:
             raise ValueError(f"Unsupported algorithm: {algorithm}")
 
-        # Build model metadata
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        model_name = f"{user_model_name}_{timestamp}"
 
-        model_name = f"{user_model_name}_{timestamp}.pkl"
-        model_path = os.path.join(self.model_dir, model_name)
+        metadata = {
+            "algorithm": algorithm,
+            "target_column": target_column,
+            "metrics": metrics,
+            "trained_at": timestamp,
+            "rows": len(df),
+            "features": list(X.columns)
+        }
 
-        # Save model
-        store_model(model, model_path)
+        #  Store in Redis
+        await store_model(
+            model_name=model_name,
+            model=model,
+            metadata=metadata
+        )
 
         return {
             "model_name": model_name,
-            "model_path": model_path,
-            "algorithm": algorithm,
-            "metrics": metrics
+            "metrics": metrics,
+            "metadata": metadata
         }
