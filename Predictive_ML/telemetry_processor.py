@@ -73,7 +73,7 @@ def handle_missing_windows(processed_data: list):
     final_data = []
 
     for sensor, rows in by_sensor.items():
-        rows = sorted(rows, key=lambda x: x["window"])
+        rows = sorted(rows, key=lambda x: x["window_start"])
 
         last_valid = None
         missing_count = 0
@@ -107,16 +107,16 @@ def label_data(aggregated_data, threshold_map):
         sensor = row["sensor"]
         value = row["avg"]
 
-        label = "NORMAL"
+        label = 0 # Default: normal
 
         if sensor in threshold_map:
             pf = threshold_map[sensor]["prefailure"]
             fl = threshold_map[sensor]["failure"]
 
             if value >= fl:
-                label = "POSTFAILURE"
+                label = 2 # Failure
             elif value >= pf:
-                label = "PREFAILURE"
+                label = 1 # Pre-failure
 
         labeled.append({
             **row,

@@ -1,0 +1,3 @@
+import logging
+from fetch_assets_telemetry import fetch_telemetry_data
+

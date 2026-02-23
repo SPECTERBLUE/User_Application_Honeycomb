@@ -1,10 +1,83 @@
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 from Predictive_ML.ml.trainers.random_forest import train_random_forest
 from Predictive_ML.ml.model_store import store_model
 
+def resolve_window_status(status_series):
+    if "NOT_WORKING" in status_series.values:
+        return "NOT_WORKING"
+    elif "FILLED" in status_series.values:
+        return "FILLED"
+    else:
+        return "OK"
+
+def covert_csv_to_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    '''
+    Docstring for covert_csv_to_dataframe
+    
+    :param df: Description
+    '''
+    # sensor,window_start,count,avg,min,max,status,label --- original csv columns
+    # need to covert the coloums to window_start,sensor_name_n,label,status
+    # where n is the sensor number (1,2,3..)
+    
+    '''
+    sensor,window_start,count,avg,min,max,status,label
+    Vibration,1771831768,1,0.754,0.754,0.754,OK,0
+    Vibration,1771831772,1,1.156,1.156,1.156,OK,1
+    Vibration,1771831776,1,0.064,0.064,0.064,OK,0
+    Temp,1771831768,1,35.2,35.2,35.2,OK,0
+    Temp,1771831772,1,36.5,36.5,36.5,OK,1
+    Temp,1771831776,1,34.8,34.8,34.8,OK,0
+    Pressure,1771831768,1,101.3,101.3,101.3,OK,0
+    Pressure,1771831772,1,102.5,102.5,102.5,OK,1
+    Pressure,1771831776,1,100.8,100.8,100.8,OK,0
+    '''
+    """
+    Converts long-format telemetry CSV into wide ML-ready dataframe.
+
+    Input columns:
+    sensor, window_start, count, avg, min, max, status, label
+
+    Output:
+    window_start, sensor_1, sensor_2, ..., status, label
+    """
+    if df.empty:
+        raise ValueError("Input dataframe is empty")
+
+    # 🔹 Ensure proper sorting
+    df = df.sort_values(["window_start", "sensor"])
+
+    # 🔹 Pivot → wide format
+    pivot_df = df.pivot(
+        index="window_start",
+        columns="sensor",
+        values="avg"
+    )
+    
+    # 🔹 Rename columns → Vibration → Vibration_avg
+    pivot_df.columns = [f"{col}_avg" for col in pivot_df.columns]
+
+    # 🔹 Bring status + label (per window)
+    meta_df = df.groupby("window_start").agg({
+        "status": resolve_window_status,
+        "label": "first"
+    })
+
+    # 🔹 Merge
+    final_df = pivot_df.join(meta_df)
+
+    # 🔹 Reset index → make window_start a column
+    final_df = final_df.reset_index()
+    final_df = final_df.reindex(sorted(final_df.columns), axis=1)
+
+    # 🔹 Sort by time
+    final_df = final_df.sort_values("window_start")
+
+    return final_df
+    
 
 class TrainService:
 
@@ -19,14 +92,24 @@ class TrainService:
     ) -> Dict[str, Any]:
 
         df = pd.read_csv(csv_path)
+        df = covert_csv_to_dataframe(df)
 
         if target_column not in df.columns:
             raise ValueError(f"{target_column} not found in dataset")
 
-        X = df.drop(columns=[target_column])
+        # keep only healthy windows
+        if "status" in df.columns:
+            df = df[df["status"] == "OK"]
+
+        # Drop non-feature columns
+        drop_cols = [target_column, "window_start"]
+
+        if "status" in df.columns:
+            drop_cols.append("status")
+
+        X = df.drop(columns=drop_cols)
         y = df[target_column]
 
-        # Train
         if algorithm == "random_forest":
             model, metrics = train_random_forest(
                 X, y, test_size=test_size, random_state=random_state
@@ -34,7 +117,7 @@ class TrainService:
         else:
             raise ValueError(f"Unsupported algorithm: {algorithm}")
 
-        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         model_name = f"{user_model_name}_{timestamp}"
 
         metadata = {
@@ -46,12 +129,7 @@ class TrainService:
             "features": list(X.columns)
         }
 
-        #  Store in Redis
-        await store_model(
-            model_name=model_name,
-            model=model,
-            metadata=metadata
-        )
+        await store_model(model_name, model, metadata)
 
         return {
             "model_name": model_name,
