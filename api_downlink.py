@@ -19,7 +19,8 @@ from Predictive_ML.training_dataset_csv_creation import (
     create_training_dataset_csv
 )
 from Predictive_ML.ml.train_service import TrainService
-from Predictive_ML.ml.model_store import load_model, delete_model, list_models
+from Predictive_ML.ml.model_store import load_model, delete_model as stored_delete_model, list_models as stored_list_models 
+from Predictive_ML.ml.prediction import predict
 from typing import List
 import pyotp
 import qrcode
@@ -1906,14 +1907,15 @@ async def train_model_api(
     try:
         
         # 🔹 prevent overwrite
-        existing_models = await list_models()
+        existing_models = await stored_list_models()
         if payload.model_name in existing_models:
             raise HTTPException(
                 status_code=400,
                 detail="Model name already exists"
             )
-
+            
         train_service = TrainService()
+        
         result = train_service.train(
             csv_path=payload.dataset_path,
             target_column=payload.target_column,
@@ -1940,7 +1942,7 @@ async def train_model_api(
 @app.get("/downlink/predictive_ML/models", summary="List stored ML models")
 async def list_models(current_user=Depends(auth.get_current_user)):
     
-    models = await list_models()
+    models =  stored_list_models()
 
     return {
         "status": "success",
@@ -1970,7 +1972,7 @@ async def delete_model(
     current_user=Depends(auth.get_current_user)
 ):
     
-    await delete_model(model_name)
+    await stored_delete_model(model_name)
 
     return {
         "status": "success",
