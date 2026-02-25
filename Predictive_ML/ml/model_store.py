@@ -1,7 +1,7 @@
 import pickle
 import json
 from typing import Optional, Tuple, Dict, Any, List
-from captcha_utils import redis_client  
+from captcha_utils import redis_client_binary 
 
 MODEL_KEY = "ml:model:{name}"
 META_KEY = "ml:model:meta:{name}"
@@ -22,19 +22,19 @@ async def store_model(
     model_blob = pickle.dumps(model)
 
     # store binary model
-    await redis_client.set(
+    await redis_client_binary.set(
         MODEL_KEY.format(name=model_name),
         model_blob
     )
 
     # store metadata as JSON
-    await redis_client.set(
+    await redis_client_binary.set(
         META_KEY.format(name=model_name),
         json.dumps(metadata)
     )
 
     # add to model registry
-    await redis_client.sadd(MODEL_LIST_KEY, model_name)
+    await redis_client_binary.sadd(MODEL_LIST_KEY, model_name)
 
 
 # ---------------- LOAD MODEL ---------------- #
@@ -43,14 +43,14 @@ async def load_model(
     model_name: str
 ) -> Tuple[Optional[Any], Optional[Dict[str, Any]]]:
 
-    model_blob = await redis_client.get(
+    model_blob = await redis_client_binary.get(
         MODEL_KEY.format(name=model_name)
     )
 
     if not model_blob:
         return None, None
 
-    metadata_raw = await redis_client.get(
+    metadata_raw = await redis_client_binary.get(
         META_KEY.format(name=model_name)
     )
 
@@ -64,19 +64,19 @@ async def load_model(
 
 async def delete_model(model_name: str):
 
-    await redis_client.delete(
+    await redis_client_binary.delete(
         MODEL_KEY.format(name=model_name)
     )
 
-    await redis_client.delete(
+    await redis_client_binary.delete(
         META_KEY.format(name=model_name)
     )
 
-    await redis_client.srem(MODEL_LIST_KEY, model_name)
+    await redis_client_binary.srem(MODEL_LIST_KEY, model_name)
 
 
 # ---------------- LIST MODELS ---------------- #
 
 async def list_models() -> List[str]:
-    models = await redis_client.smembers(MODEL_LIST_KEY)
+    models = await redis_client_binary.smembers(MODEL_LIST_KEY)
     return list(models)
