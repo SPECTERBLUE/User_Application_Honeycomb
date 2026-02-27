@@ -20,9 +20,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------
 # Redis connection
 # ---------------------------
+redis_client_binary = redis.Redis(
+    host="localhost",
+    port=6379,
+    decode_responses=False
+)
 redis_client = redis.Redis(
     host="localhost",
-    port=6389,
+    port=6379,
     decode_responses=True
 )
 

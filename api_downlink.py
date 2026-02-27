@@ -5,12 +5,23 @@ import User_token
 from SMTP_init import LoginAlertMailer
 from pydantic import BaseModel, Field, field_validator, EmailStr
 from pydantic import FieldValidationInfo
+from pydantic import BaseModel, Field
+from typing import Literal, Optional, Dict
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from auth import models,schemas,database,auth
 from forgot_password import generate_reset_token, verify_reset_token
 from typing import Optional
+from Predictive_ML import fetch_assets_telemetry
+from Predictive_ML import telemetry_processor
+from Predictive_ML.training_dataset_csv_creation import (
+    create_training_dataset_csv
+)
+from Predictive_ML.ml.train_service import TrainService
+from Predictive_ML.ml.model_store import load_model, delete_model as stored_delete_model, list_models as stored_list_models 
+from Predictive_ML.ml.prediction import predict
+from typing import List
 import pyotp
 import qrcode
 import base64
@@ -545,6 +556,41 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
 
 # set to symmetric cyphering or asymmetric cyphering
 
+@app.post("/downlink/chirpstack-data", summary="Sending data decripted from chirpstack using symetric cyphering, also converting the json format of the data to senml format")
+async def chirpstack_data(data: Request):
+    
+    try:
+        '''retrive incoming headers and body data'''
+        headers = data.headers
+        body = await data.body()
+        logger.info(f"Received headers: {headers}")
+        logger.info(f"Received body: {body}")
+        
+        for key, value in headers.items():
+            logger.info(f"Header: {key} = {value}")
+            
+        # Get Device-Type header (case-insensitive)
+        device_type = headers.get("device-type")
+
+        if not device_type:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Device-Type header missing"
+            )
+
+        logger.info(f"Device-Type: {device_type}")
+        
+        
+    except Exception as e:
+        logger.error(f"Error reading request data: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request data"
+        )    
+
+
+        
+#####################################################################################################        
 CONFIG_FILE = "config.py"
 
 class Cymetric_body(BaseModel):
@@ -1638,4 +1684,408 @@ async def verify_captcha(request: CaptchaVerifyRequest, auth: str = Depends(auth
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal Server Error: " + str(e)
+        )
+
+##############################################################################################
+# predictive maintainance apis below
+##############################################################################################
+
+# ------------------ REQUEST MODELS ------------------ #
+
+class ThresholdConfig(BaseModel):
+    sensor: str
+    prefailure: float
+    failure: float
+
+
+class AssetTelemetryRequest(BaseModel):
+    asset_id: str
+    window_length: int = Field(
+        ...,
+        gt=0,
+        description="Window length in seconds for aggregation"
+    )
+    thresholds: list[ThresholdConfig]
+
+
+# ------------------ API ------------------ #
+
+@app.post(
+    "/downlink/predictive_ML/assets/telemetry",
+    summary="Fetch telemetry, aggregate, label and generate training CSV"
+)
+async def get_asset_telemetry(
+    payload: AssetTelemetryRequest,
+    current_user=Depends(auth.get_current_user)
+):
+
+    asset_id = payload.asset_id
+    window_length = payload.window_length
+
+    try:
+        # 🔹 Convert threshold list → fast lookup dict
+        threshold_map = {
+            t.sensor: {
+                "prefailure": t.prefailure,
+                "failure": t.failure
+            }
+            for t in payload.thresholds
+        }
+
+        telemetry_fetcher = fetch_assets_telemetry.FetchAssetsTelemetry()
+        telemetry_data = telemetry_fetcher.get_telemetry_data_asset(asset_id)
+
+        if telemetry_data is None:
+            return {
+                "status": "error",
+                "message": "Failed to fetch telemetry data for the asset."
+            }
+
+        # 🔹 Aggregate
+        processor = telemetry_processor.TelemetryProcessor(telemetry_data)
+
+        processed_data = processor.aggregate_window(
+            window_size_sec=window_length
+        )
+
+        # 🔹 Handle missing windows (your existing logic)
+        processed_data = telemetry_processor.handle_missing_windows(
+            processed_data
+        )
+
+        # 🔹 Apply labeling
+        labeled_data = telemetry_processor.label_data(
+            aggregated_data=processed_data,
+            threshold_map=threshold_map
+        )
+        
+        # 🔹 Store labeled data in Redis
+        await redis_client.set(f"Window_length:{asset_id}", window_length)
+        await redis_client.set(f"threshold_map:{asset_id}", json.dumps(threshold_map))
+        
+        # 🔹 Store CSV for ML training
+        dataset_path = create_training_dataset_csv(
+            processed_data=labeled_data,
+            asset_id=asset_id,
+            window_length=window_length
+        )
+
+        return {
+            "status": "success",
+            "asset_id": asset_id,
+            "window_length": window_length,
+            "count": len(labeled_data),
+            "dataset_path": dataset_path,
+            "data": labeled_data
+        }
+
+    except Exception as e:
+        logging.error(
+            f"Error processing telemetry for asset {asset_id}: {e}",
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while processing telemetry data."
+        )
+
+class ThingTelemetryRequest(BaseModel):
+    thing_id: str
+    asset_id: str
+    window_length: int = Field(
+        ...,
+        gt=0,
+        description="Window length in seconds for aggregation"
+    )
+    
+@app.post(
+    "/downlink/predictive_ML/things/telemetry",
+    summary="Fetch telemetry data for a thing within an asset"
+)
+def get_thing_telemetry(
+    payload: ThingTelemetryRequest,
+    current_user = Depends(auth.get_current_user)
+):
+    """
+    Fetches all telemetry data for a given thing ID within a specified asset ID.
+    """
+
+    thing_id = payload.thing_id
+    asset_id = payload.asset_id
+    window_length = payload.window_length
+
+    try:
+        telemetry_fetcher = fetch_assets_telemetry.FetchAssetsTelemetry()
+        telemetry_data = telemetry_fetcher.get_telemetry_data_things(thing_id, asset_id)
+
+        if telemetry_data is None:
+            return {
+                "status": "error",
+                "message": "Failed to fetch telemetry data for the thing."
+            }
+        
+        # process telemetry
+        processor = telemetry_processor.TelemetryProcessor(telemetry_data)
+        processed_data_thing = processor.aggregate_window(
+            window_size_sec=window_length
+        )
+
+        return {
+            "status": "success",
+            "thing_id": thing_id,
+            "asset_id": asset_id,
+            "count": len(telemetry_data),
+            "data": processed_data_thing
+        }
+
+    except Exception as e:
+        logging.error(f"Error fetching telemetry for thing {thing_id} in asset {asset_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while fetching telemetry data."
+        )
+
+########################################################################
+# list of the csv files required for training
+########################################################################
+@app.get(
+    "/downlink/predictive_ML/datasets",
+    summary="List all available training CSV datasets"
+)
+def list_training_datasets(
+    current_user=Depends(auth.get_current_user)
+) -> dict:
+
+    try:
+        BASE_DATASET_DIR = "data/training_datasets"
+        if not os.path.exists(BASE_DATASET_DIR):
+            raise HTTPException(
+                status_code=404,
+                detail="Dataset directory not found"
+            )
+
+        files = [
+            f for f in os.listdir(BASE_DATASET_DIR)
+            if f.endswith(".csv")
+        ]
+
+        datasets: List[dict] = []
+
+        for file in files:
+            full_path = os.path.join(BASE_DATASET_DIR, file)
+
+            datasets.append({
+                "file_name": file,
+                "path": full_path,
+                "size_kb": round(os.path.getsize(full_path) / 1024, 2),
+                "last_modified": os.path.getmtime(full_path)
+            })
+
+        return {
+            "status": "success",
+            "dataset_dir": BASE_DATASET_DIR,
+            "count": len(datasets),
+            "datasets": datasets
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error listing datasets: {str(e)}"
+        )
+######################################################################
+# Model training and management APIs below
+######################################################################
+class TrainModelRequest(BaseModel):
+    model_name: str = Field(..., description="User-defined unique model name")
+    dataset_path: str
+    model_type: Literal["random_forest", "xgboost", "lstm"]
+    target_column: str = "label"
+    horizon: Literal["1h", "6h", "24h"]
+
+
+@app.post("/downlink/predictive_ML/train", summary="Train ML model and store in Redis")
+async def train_model_api(
+    payload: TrainModelRequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        
+        # 🔹 prevent overwrite
+        existing_models = await stored_list_models()
+        if payload.model_name in existing_models:
+            raise HTTPException(
+                status_code=400,
+                detail="Model name already exists"
+            )
+            
+        train_service = TrainService()
+        
+        result = await train_service.train(
+            csv_path=payload.dataset_path,
+            target_column=payload.target_column,
+            user_model_name=payload.model_name,
+            algorithm=payload.model_type,
+            horizon=payload.horizon
+        )
+
+        return {
+            "status": "success",
+            "message": "Model trained and stored in Redis",
+            "model_name": payload.model_name,
+            "metrics": result["metrics"],
+            "metadata": result["metadata"]
+        }
+
+    except Exception as e:
+        logging.error(f"Model training failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Model training failed")
+
+############################################################################
+# Model store in redis using pickle for model and JSON for metadata. This allows storing complex ML models and their associated metadata efficiently.
+############################################################################
+
+@app.get("/downlink/predictive_ML/models", summary="List stored ML models")
+async def list_models(current_user=Depends(auth.get_current_user)):
+    
+    models =  await stored_list_models()
+
+    return {
+        "status": "success",
+        "models": models
+    }
+
+@app.get("/downlink/predictive_ML/models/{model_name}")
+async def get_model_metadata(
+    model_name: str,
+    current_user=Depends(auth.get_current_user)
+):
+    
+    model, metadata = await load_model(model_name)
+
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    return {
+        "status": "success",
+        "model_name": model_name,
+        "metadata": metadata
+    }
+    
+@app.delete("/downlink/predictive_ML/models/{model_name}")
+async def delete_model(
+    model_name: str,
+    current_user=Depends(auth.get_current_user)
+):
+    
+    await stored_delete_model(model_name)
+
+    return {
+        "status": "success",
+        "message": f"Model '{model_name}' deleted"
+    }
+
+###################################################################################################################
+#APis for prediction of telemetry data using the stored models can be added here. The endpoint would accept telemetry data, load the appropriate model from Redis, and return predictions based on the input data.
+###################################################################################################################
+# Aslo the user will need to specify the model that is saved in the redis database to be used for the prediction. The model will be loaded from the redis database and used to make predictions on the input telemetry data. The predictions can then be returned in the response of the API call.
+class PredictRequest(BaseModel):
+    model_name: str
+    asset_id: str
+    
+
+@app.post(
+    "/downlink/predictive_ML/predict",
+    summary="Run prediction using stored ML model"
+)
+async def predict_api(
+    payload: PredictRequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        result = await predict(
+            model_name=payload.model_name,
+            asset_id=payload.asset_id
+        )
+
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Prediction failed. No telemetry data found."
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logging.error(f"Prediction API failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Prediction failed"
+        )
+        
+#########################################################################################
+# apis for brousing and managing the redis database for predictive maintenance models and telemetry data can be added here. This would include endpoints to list all keys, view specific key values, and delete keys from the Redis database. These APIs would help users manage their stored models and telemetry data effectively.
+#########################################################################################
+
+@app.get("/downlink/predictive_ML/redis/keys", summary="List all Redis keys for predictive maintenance")
+async def list_redis_keys(current_user=Depends(auth.get_current_user)):
+    try:
+        keys = await redis_client.keys("threshold_map:*") + await redis_client.keys("Window_length:*") + await redis_client.keys("model:*")
+        return {
+            "status": "success",
+            "keys": keys
+        }
+    except Exception as e:
+        logging.error(f"Failed to list Redis keys: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to list Redis keys"
+        )
+        
+@app.get("/downlink/predictive_ML/redis/key", summary="Get value of a specific Redis key")
+async def get_redis_key_value(key_name: str, current_user=Depends(auth.get_current_user)):
+    try:
+        value = await redis_client.get(key_name)
+        if value is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Key not found in Redis"
+            )
+        return {
+            "status": "success",
+            "key": key_name,
+            "value": value
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to get Redis key value: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to get Redis key value"
+        )
+        
+@app.delete("/downlink/predictive_ML/redis/key", summary="Delete a specific Redis key")
+async def delete_redis_key(key_name: str, current_user=Depends(auth.get_current_user)):
+    try:
+        result = await redis_client.delete(key_name)
+        if result == 0:
+            raise HTTPException(
+                status_code=404,
+                detail="Key not found in Redis"
+            )
+        return {
+            "status": "success",
+            "message": f"Key '{key_name}' deleted from Redis"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to delete Redis key: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete Redis key"
         )
