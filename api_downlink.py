@@ -1758,7 +1758,12 @@ def get_asset_telemetry(
             aggregated_data=processed_data,
             threshold_map=threshold_map
         )
-
+        
+        redis_store_labeldata = redis_client()
+        # 🔹 Store labeled data in Redis
+        redis_store_labeldata.set(f"Window_length:{asset_id}", window_length)
+        redis_store_labeldata.set(f"threshold_map:{asset_id}", json.dumps(threshold_map))
+        
         # 🔹 Store CSV for ML training
         dataset_path = create_training_dataset_csv(
             processed_data=labeled_data,
@@ -1897,6 +1902,7 @@ class TrainModelRequest(BaseModel):
     dataset_path: str
     model_type: Literal["random_forest", "xgboost", "lstm"]
     target_column: str = "label"
+    horizon: Literal["1h", "6h", "24h"]
 
 
 @app.post("/downlink/predictive_ML/train", summary="Train ML model and store in Redis")
@@ -1920,7 +1926,8 @@ async def train_model_api(
             csv_path=payload.dataset_path,
             target_column=payload.target_column,
             user_model_name=payload.model_name,
-            algorithm=payload.model_type
+            algorithm=payload.model_type,
+            horizon=payload.horizon
         )
 
         return {
@@ -1942,7 +1949,7 @@ async def train_model_api(
 @app.get("/downlink/predictive_ML/models", summary="List stored ML models")
 async def list_models(current_user=Depends(auth.get_current_user)):
     
-    models =  stored_list_models()
+    models =  await stored_list_models()
 
     return {
         "status": "success",
@@ -1979,3 +1986,43 @@ async def delete_model(
         "message": f"Model '{model_name}' deleted"
     }
 
+###################################################################################################################
+#APis for prediction of telemetry data using the stored models can be added here. The endpoint would accept telemetry data, load the appropriate model from Redis, and return predictions based on the input data.
+###################################################################################################################
+# Aslo the user will need to specify the model that is saved in the redis database to be used for the prediction. The model will be loaded from the redis database and used to make predictions on the input telemetry data. The predictions can then be returned in the response of the API call.
+class PredictRequest(BaseModel):
+    model_name: str
+    asset_id: str
+    
+
+@app.post(
+    "/downlink/predictive_ML/predict",
+    summary="Run prediction using stored ML model"
+)
+async def predict_api(
+    payload: PredictRequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        result = await predict(
+            model_name=payload.model_name,
+            asset_id=payload.asset_id
+        )
+
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Prediction failed. No telemetry data found."
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logging.error(f"Prediction API failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Prediction failed"
+        )

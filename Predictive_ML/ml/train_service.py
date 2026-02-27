@@ -1,9 +1,10 @@
 import pandas as pd
+import logging
 from datetime import datetime, timezone
 from typing import Dict, Any
-
 from Predictive_ML.ml.trainers.random_forest import train_random_forest
 from Predictive_ML.ml.model_store import store_model
+from sklearn.metrics import confusion_matrix
 
 def resolve_window_status(status_series):
     if "NOT_WORKING" in status_series.values:
@@ -12,6 +13,18 @@ def resolve_window_status(status_series):
         return "FILLED"
     else:
         return "OK"
+    
+def horizon_to_steps(horizon: str, freq_minutes: int) -> int:
+    horizon_map = {
+        "1h": 60,
+        "6h": 360,
+        "24h": 1440
+    }
+
+    if horizon not in horizon_map:
+        raise ValueError("Invalid horizon. Use 1h, 6h, 24h")
+
+    return horizon_map[horizon] // freq_minutes
 
 def covert_csv_to_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     '''
@@ -86,9 +99,11 @@ class TrainService:
         csv_path: str,
         target_column: str,
         user_model_name: str,
+        horizon: str,
         algorithm: str = "random_forest",
         test_size: float = 0.2,
-        random_state: int = 42
+        random_state: int = 42,
+        freq_minutes: int = 5
     ) -> Dict[str, Any]:
 
         df = pd.read_csv(csv_path)
@@ -96,6 +111,18 @@ class TrainService:
 
         if target_column not in df.columns:
             raise ValueError(f"{target_column} not found in dataset")
+        
+        # Convert horizon to steps        steps = horizon_to_steps(horizon, freq_minutes)
+        df = df.sort_values("window_start")
+        
+        # convert horizon → number of rows to shift
+        steps = horizon_to_steps(horizon, freq_minutes)
+
+        # create FUTURE label
+        df[target_column] = df[target_column].shift(-steps)
+
+        # drop rows that don’t have future label
+        df = df.dropna(subset=[target_column])
 
         # keep only healthy windows
         if "status" in df.columns:
@@ -123,6 +150,7 @@ class TrainService:
         metadata = {
             "algorithm": algorithm,
             "target_column": target_column,
+            "horizon": horizon,
             "metrics": metrics,
             "trained_at": timestamp,
             "rows": len(df),
@@ -135,4 +163,70 @@ class TrainService:
             "model_name": model_name,
             "metrics": metrics,
             "metadata": metadata
+        }
+
+    @staticmethod
+    async def future_predict(data,model,metadata):
+        # This function can be used for future real-time predictions
+        # It would preprocess incoming data in the same way as training data
+        # and then call model.predict() to get predictions
+         
+        if not data:
+                logging.error("No data received for prediction.")
+                return None
+
+        # 🔹 Convert to DataFrame
+        df = pd.DataFrame(data)
+
+        # 🔹 Apply SAME transformation used during training
+        df = covert_csv_to_dataframe(df)
+        
+        # 🔹 Ensure sorted (important for latest window selection)
+        df = df.sort_values("window_start")
+
+        expected_features = metadata.get("features", [])
+        horizon = metadata.get("horizon")
+        freq_minutes = metadata.get("freq_minutes", 5)
+        
+        # 🔹 Validate features
+        missing_features = [
+            col for col in expected_features if col not in df.columns
+        ]
+
+        if missing_features:
+            raise ValueError(
+                f"Missing features for prediction: {missing_features}"
+            )
+        
+        X = df[expected_features].reindex(columns=expected_features)
+
+        # 🔹 True labels (if present → for confusion matrix)
+        y_true = df["label"].tolist() if "label" in df.columns else None
+
+        # 🔹 Predict
+        y_pred = model.predict(X)
+
+        if hasattr(model, "predict_proba"):
+            y_prob = model.predict_proba(X).tolist()
+        else:
+            y_prob = None
+
+        # 🔹 Time handling
+        timestamps = df["window_start"].tolist()
+
+        # future timestamps for horizon graphs
+        steps = horizon_to_steps(horizon, freq_minutes)
+        future_timestamps = [
+            ts + steps * freq_minutes * 60 for ts in timestamps
+        ]
+        cm = confusion_matrix(y_true, y_pred).tolist() if y_true else None
+
+        return {
+            "timestamps": timestamps,
+            "future_timestamps": future_timestamps,
+            "y_true": y_true,
+            "y_pred": y_pred.tolist(),
+            "probabilities": y_prob,
+            "confusion_matrix": cm,
+            "horizon": horizon
         }
