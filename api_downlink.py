@@ -2025,3 +2025,67 @@ async def predict_api(
             status_code=500,
             detail="Prediction failed"
         )
+        
+#########################################################################################
+# apis for brousing and managing the redis database for predictive maintenance models and telemetry data can be added here. This would include endpoints to list all keys, view specific key values, and delete keys from the Redis database. These APIs would help users manage their stored models and telemetry data effectively.
+#########################################################################################
+
+@app.get("/downlink/predictive_ML/redis/keys", summary="List all Redis keys for predictive maintenance")
+async def list_redis_keys(current_user=Depends(auth.get_current_user)):
+    try:
+        keys = await redis_client.keys("threshold_map:*") + await redis_client.keys("Window_length:*") + await redis_client.keys("model:*")
+        return {
+            "status": "success",
+            "keys": keys
+        }
+    except Exception as e:
+        logging.error(f"Failed to list Redis keys: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to list Redis keys"
+        )
+        
+@app.get("/downlink/predictive_ML/redis/key", summary="Get value of a specific Redis key")
+async def get_redis_key_value(key_name: str, current_user=Depends(auth.get_current_user)):
+    try:
+        value = await redis_client.get(key_name)
+        if value is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Key not found in Redis"
+            )
+        return {
+            "status": "success",
+            "key": key_name,
+            "value": value
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to get Redis key value: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to get Redis key value"
+        )
+        
+@app.delete("/downlink/predictive_ML/redis/key", summary="Delete a specific Redis key")
+async def delete_redis_key(key_name: str, current_user=Depends(auth.get_current_user)):
+    try:
+        result = await redis_client.delete(key_name)
+        if result == 0:
+            raise HTTPException(
+                status_code=404,
+                detail="Key not found in Redis"
+            )
+        return {
+            "status": "success",
+            "message": f"Key '{key_name}' deleted from Redis"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to delete Redis key: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete Redis key"
+        )
