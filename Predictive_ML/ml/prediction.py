@@ -1,11 +1,11 @@
 import logging
 from rich import json
 from Predictive_ML import telemetry_processor
-from fetch_assets_telemetry import FetchAssetsTelemetry
-from telemetry_processor import TelemetryProcessor
-from model_store import load_model
+from Predictive_ML.fetch_assets_telemetry import FetchAssetsTelemetry
+from Predictive_ML.telemetry_processor import TelemetryProcessor
+from Predictive_ML.ml.model_store import load_model
 from captcha_utils import redis_client
-from train_service import TrainService
+from Predictive_ML.ml.train_service import TrainService
 import pandas as pd
 
 

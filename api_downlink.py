@@ -1714,7 +1714,7 @@ class AssetTelemetryRequest(BaseModel):
     "/downlink/predictive_ML/assets/telemetry",
     summary="Fetch telemetry, aggregate, label and generate training CSV"
 )
-def get_asset_telemetry(
+async def get_asset_telemetry(
     payload: AssetTelemetryRequest,
     current_user=Depends(auth.get_current_user)
 ):
@@ -1759,10 +1759,9 @@ def get_asset_telemetry(
             threshold_map=threshold_map
         )
         
-        redis_store_labeldata = redis_client()
         # 🔹 Store labeled data in Redis
-        redis_store_labeldata.set(f"Window_length:{asset_id}", window_length)
-        redis_store_labeldata.set(f"threshold_map:{asset_id}", json.dumps(threshold_map))
+        await redis_client.set(f"Window_length:{asset_id}", window_length)
+        await redis_client.set(f"threshold_map:{asset_id}", json.dumps(threshold_map))
         
         # 🔹 Store CSV for ML training
         dataset_path = create_training_dataset_csv(
@@ -1922,7 +1921,7 @@ async def train_model_api(
             
         train_service = TrainService()
         
-        result = train_service.train(
+        result = await train_service.train(
             csv_path=payload.dataset_path,
             target_column=payload.target_column,
             user_model_name=payload.model_name,
