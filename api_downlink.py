@@ -2089,3 +2089,141 @@ async def delete_redis_key(key_name: str, current_user=Depends(auth.get_current_
             status_code=500,
             detail="Failed to delete Redis key"
         )
+        
+###################################################################################
+# sensor mapping between frontend and backend can be handled in the telemetry processing step. The API can accept a mapping of sensor names from the frontend to the actual sensor names used in the telemetry data. This mapping can then be applied during the aggregation and labeling process to ensure that the correct sensors are being processed and labeled according to the provided thresholds. This allows for flexibility in the frontend while maintaining consistency in the backend processing.
+###################################################################################
+class SensorMappingRequest(BaseModel):
+    model_name: str
+    sensor_mapping: dict[str, str]  # backend sensor name -> frontend sensor name
+
+@app.post(
+    "/downlink/predictive_ML/model/sensor-mapping",
+    summary="Register frontend sensors to model features"
+)
+async def set_sensor_mapping(
+    payload: SensorMappingRequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+
+        key = f"sensor_map:{payload.model_name}"
+
+        await redis_client.set(
+            key,
+            json.dumps(payload.sensor_mapping)
+        )
+
+        return {
+            "status": "success",
+            "model_name": payload.model_name,
+            "sensor_mapping": payload.sensor_mapping
+        }
+
+    except Exception as e:
+        logging.error(f"Failed to store sensor mapping: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to store sensor mapping"
+        )
+        
+@app.get(
+    "/downlink/predictive_ML/model/sensor-mapping",
+    summary="Get sensor mapping for a model"
+)
+async def get_sensor_mapping(
+    payload: SensorMappingRequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        key = f"sensor_map:{payload.model_name}"
+        mapping_json = await redis_client.get(key)
+
+        if not mapping_json:
+            raise HTTPException(
+                status_code=404,
+                detail="Sensor mapping not found for the model"
+            )
+
+        sensor_mapping = json.loads(mapping_json)
+
+        return {
+            "status": "success",
+            "model_name": payload.model_name,
+            "sensor_mapping": sensor_mapping
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to retrieve sensor mapping: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve sensor mapping"
+        )
+        
+@app.delete(
+    "/downlink/predictive_ML/model/sensor-mapping",
+    summary="Delete sensor mapping for a model"
+)
+async def delete_sensor_mapping(
+    payload: SensorMappingRequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        key = f"sensor_map:{payload.model_name}"
+        result = await redis_client.delete(key)
+
+        if result == 0:
+            raise HTTPException(
+                status_code=404,
+                detail="Sensor mapping not found for the model"
+            )
+
+        return {
+            "status": "success",
+            "message": f"Sensor mapping for model '{payload.model_name}' deleted"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to delete sensor mapping: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete sensor mapping"
+        )
+        
+###########################################################################
+# get the key and modelname sensor mapping from json file- sensor_mapping.json. This file will contain a mapping of the sensor names used in the telemetry data to the sensor names used in the ML model. The API can read this file and return the mapping to the frontend, which can then use it to display the correct sensor names to the user and ensure that the correct sensors are being processed for predictions.
+###########################################################################
+
+app.get(
+    "/downlink/predictive_ML/model/sensor-mapping/default",
+    summary="Get backend sensor mapping from JSON file"
+)
+async def get_default_sensor_mapping(
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        with open("Predictive_ML/sensor_mapping.json", "r") as f:
+            data = json.load(f)
+
+        return {
+            "status": "success",
+            "whole_json": data,
+            "model_name": data.get("model_name"),
+            "sensor_mapping": data.get("sensor_mapping")
+        }
+
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Sensor mapping file not found"
+        )
+    except Exception as e:
+        logging.error(f"Failed to read sensor mapping file: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to read sensor mapping file"
+        )
