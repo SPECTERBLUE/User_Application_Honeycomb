@@ -5,6 +5,7 @@ from typing import Dict, Any
 from Predictive_ML.ml.trainers.random_forest import train_random_forest
 from Predictive_ML.ml.model_store import store_model
 from sklearn.metrics import confusion_matrix
+from Predictive_ML.ml.trainers.xgboost import train_xgboost
 
 def resolve_window_status(status_series):
     if "NOT_WORKING" in status_series.values:
@@ -139,6 +140,10 @@ class TrainService:
 
         if algorithm == "random_forest":
             model, metrics = train_random_forest(
+                X, y, test_size=test_size, random_state=random_state
+            )
+        elif algorithm == "xgboost":
+            model, metrics = train_xgboost(
                 X, y, test_size=test_size, random_state=random_state
             )
         else:
