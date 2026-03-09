@@ -20,7 +20,7 @@ from Predictive_ML.training_dataset_csv_creation import (
 )
 from Predictive_ML.ml.train_service import TrainService
 from Predictive_ML.ml.model_store import load_model, delete_model as stored_delete_model, list_models as stored_list_models 
-from Predictive_ML.ml.prediction import predict
+from Predictive_ML.ml.prediction import predict, predict_specific
 from typing import List
 import pyotp
 import qrcode
@@ -2226,4 +2226,122 @@ async def get_default_sensor_mapping(
         raise HTTPException(
             status_code=500,
             detail="Failed to read sensor mapping file"
+        )
+
+###################################################################
+# Apis for asset specific models
+###################################################################
+class Assettelemertyfetchandtrainrequest(BaseModel):
+    asset_id: str
+    model_name: str
+    model_type: Literal["random_forest", "xgboost", "lstm"]
+    target_column: str = "label"
+    horizon: Literal["1h", "6h", "24h"]
+    window_length: int = Field(
+        ...,
+        gt=0,
+        description="Window length in seconds for aggregation"
+    )
+    
+@app.post(
+    "/downlink/predictive_ML/Asset_specific/assets/fetch-train",
+    summary="Fetch telemetry for an asset, process it and train a model"
+)
+async def fetch_train_asset_model(
+    payload: Assettelemertyfetchandtrainrequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        # 1. Fetch telemetry data for the asset
+        telemetry_fetcher = fetch_assets_telemetry.FetchAssetsTelemetry()
+        telemetry_data = telemetry_fetcher.get_telemetry_data_asset(payload.asset_id)
+
+        if telemetry_data is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Failed to fetch telemetry data for the asset."
+            )
+
+        # 2. Process telemetry data (aggregation, labeling, etc.)
+        processor = telemetry_processor.TelemetryProcessor(telemetry_data)
+        processed_data = processor.aggregate_window(
+            window_size_sec=payload.window_length
+        )
+        processed_data = telemetry_processor.handle_missing_windows(processed_data)
+        
+        await redis_client.set(f"Window_length:{payload.asset_id}", payload.window_length)
+        
+        # Threshold map according to the model_name for each sensor present in the asset for its monitoring.
+        if payload.model_name == "Slipring_Induction_motor_60kw":
+            threshold_map = {
+                "Vibration_avg": {"prefailure": 5.0, "failure": 7.0},
+                "Temperature_avg": {"prefailure": 80.0, "failure": 90.0},
+                "Stator_Current_avg": {"prefailure": 10.0, "failure": 15.0},
+                "Rotor_Current_avg": {"prefailure": 8.0, "failure": 12.0}
+            }
+        
+        labeled_data = telemetry_processor.label_data(
+            aggregated_data=processed_data,
+            threshold_map=threshold_map
+        )
+        
+        train_service = TrainService()      
+        
+        result = await train_service.train_specific_model(
+            labeled_data=labeled_data,
+            target_column=payload.target_column,
+            user_model_name=payload.model_name,
+            algorithm=payload.model_type,
+            horizon=payload.horizon,
+            equipment_type=payload.model_name
+        )
+        
+        return {
+            "status": "success",
+            "message": "Model trained and stored in Redis",
+            "model_name": payload.model_name,
+            "metrics": result["metrics"],
+            "metadata": result["metadata"]
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Asset-specific model training failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Asset-specific model training failed")
+    
+class PredictSpecificRequest(BaseModel):
+    model_name: str
+    asset_id: str
+    
+@app.post(
+    "/downlink/predictive_ML/Asset_specific/predict",
+    summary="Run prediction using an asset-specific model"
+)
+async def predict_specific_asset_model(
+    payload: PredictSpecificRequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        result = await predict_specific(
+            model_name=payload.model_name,
+            asset_id=payload.asset_id
+        )
+
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Prediction failed. No telemetry data found."
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logging.error(f"Asset-specific prediction API failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Asset-specific prediction failed"
         )

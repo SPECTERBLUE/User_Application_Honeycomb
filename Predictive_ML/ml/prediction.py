@@ -6,6 +6,7 @@ from Predictive_ML.telemetry_processor import TelemetryProcessor
 from Predictive_ML.ml.model_store import load_model
 from captcha_utils import redis_client
 from Predictive_ML.ml.train_service import TrainService
+from Predictive_ML.ml.train_service import EQUIPMENT_LABELERS, covert_csv_to_dataframe
 import pandas as pd
 
 
@@ -62,4 +63,69 @@ async def predict(model_name,asset_id):
     "horizon": metadata.get("horizon"),
     "confusion_matrix": predictions.get("confusion_matrix"),
     "data": predictions
+    }
+
+async def predict_specific(model_name,asset_id):
+    '''
+    Docstring for predict_specific
+    
+    :param model: Description
+    :param telemetry_data: Description
+    '''
+    telemetry_data = FetchAssetsTelemetry().get_telemetry_data_asset(asset_id)
+    
+    if not telemetry_data:
+        logging.error(f"No telemetry data found for asset {asset_id}. Cannot make prediction.")
+        return None
+    
+    processor = TelemetryProcessor(telemetry_data)
+    
+    window_length = await redis_client.get(f"Window_length:{asset_id}")
+    if not window_length:
+        logging.warning(f"No window length found for asset {asset_id}. Using default window length of 10.")
+        window_length = 10
+    else:
+        window_length = int(window_length)
+    
+    aggregated = processor.aggregate_window(window_length)
+    
+    #handle missing windows by forward filling last known value (up to a limit)
+    
+    processed_data = telemetry_processor.handle_missing_windows(aggregated)
+    
+    # Threshold map according to the model_name for each sensor present in the asset for its monitoring.
+    if model_name == "Slipring_Induction_motor_60kw":
+        threshold_map = {
+            "Vibration_avg": {"prefailure": 5.0, "failure": 7.0},
+            "Temperature_avg": {"prefailure": 80.0, "failure": 90.0},
+            "Stator_Current_avg": {"prefailure": 10.0, "failure": 15.0},
+            "Rotor_Current_avg": {"prefailure": 8.0, "failure": 12.0}
+        }        
+
+    model, metadata = await load_model(model_name)  # async call to Redis
+    
+    equipment_type = metadata.get("equipment_type")
+
+    df = pd.DataFrame(processed_data)
+
+    df = covert_csv_to_dataframe(df)
+
+    if equipment_type not in EQUIPMENT_LABELERS:
+        raise ValueError(f"Unsupported equipment type: {equipment_type}")
+
+    label_function = EQUIPMENT_LABELERS[equipment_type]
+
+    df = label_function(df, threshold_map)
+
+    df = df.sort_values("window_start")
+
+    predictions = await TrainService.future_predict(df, model, metadata)
+
+    return {
+        "status": "success",
+        "asset_id": asset_id,
+        "model_name": model_name,
+        "horizon": metadata.get("horizon"),
+        "confusion_matrix": predictions.get("confusion_matrix"),
+        "data": predictions
     }

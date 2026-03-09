@@ -4,8 +4,16 @@ from datetime import datetime, timezone
 from typing import Dict, Any
 from Predictive_ML.ml.trainers.random_forest import train_random_forest
 from Predictive_ML.ml.model_store import store_model
+from Predictive_ML.pre_trained_models import label_motor_faults
 from sklearn.metrics import confusion_matrix
 from Predictive_ML.ml.trainers.xgboost import train_xgboost
+
+EQUIPMENT_LABELERS = {
+    "Slipring_Induction_motor_60kw": label_motor_faults,
+    # future
+    # "centrifugal_pump": label_pump_faults,
+    # "compressor": label_compressor_faults
+}
 
 def resolve_window_status(status_series):
     if "NOT_WORKING" in status_series.values:
@@ -154,6 +162,102 @@ class TrainService:
 
         metadata = {
             "algorithm": algorithm,
+            "target_column": target_column,
+            "horizon": horizon,
+            "metrics": metrics,
+            "trained_at": timestamp,
+            "rows": len(df),
+            "features": list(X.columns)
+        }
+
+        await store_model(model_name, model, metadata)
+
+        return {
+            "model_name": model_name,
+            "metrics": metrics,
+            "metadata": metadata
+        }
+        
+    async def train_specific_model(
+        self,
+        labeled_data: list,
+        target_column: str,
+        user_model_name: str,
+        horizon: str,
+        equipment_type: str,
+        thresholds: dict,
+        algorithm: str = "random_forest",
+        test_size: float = 0.2,
+        random_state: int = 42,
+        freq_minutes: int = 5
+    ) -> Dict[str, Any]:
+
+        df = pd.DataFrame(labeled_data)
+
+        # Convert telemetry → wide format
+        df = covert_csv_to_dataframe(df)
+
+        # ---------------------------------
+        # Equipment specific labeling
+        # ---------------------------------
+        if equipment_type not in EQUIPMENT_LABELERS:
+            raise ValueError(f"Unsupported equipment type: {equipment_type}")
+
+        label_function = EQUIPMENT_LABELERS[equipment_type]
+
+        df = label_function(df, thresholds)
+
+        df = df.sort_values("window_start")
+
+        # ---------------------------------
+        # Convert horizon → prediction steps
+        # ---------------------------------
+        steps = horizon_to_steps(horizon, freq_minutes)
+
+        df[target_column] = df[target_column].shift(-steps)
+
+        df = df.dropna(subset=[target_column])
+
+        # ---------------------------------
+        # Remove unhealthy windows
+        # ---------------------------------
+        if "status" in df.columns:
+            df = df[df["status"] == "OK"]
+
+        drop_cols = [target_column, "window_start"]
+
+        if "status" in df.columns:
+            drop_cols.append("status")
+
+        X = df.drop(columns=drop_cols)
+        y = df[target_column]
+
+        # ---------------------------------
+        # Model selection
+        # ---------------------------------
+        if algorithm == "random_forest":
+            model, metrics = train_random_forest(
+                X, y, test_size=test_size, random_state=random_state
+            )
+
+        elif algorithm == "xgboost":
+            model, metrics = train_xgboost(
+                X, y, test_size=test_size, random_state=random_state
+            )
+
+        else:
+            raise ValueError(f"Unsupported algorithm: {algorithm}")
+
+        # ---------------------------------
+        # Store model
+        # ---------------------------------
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+        model_name = f"{user_model_name}_{timestamp}"
+
+        metadata = {
+            "algorithm": algorithm,
+            "equipment_type": equipment_type,
             "target_column": target_column,
             "horizon": horizon,
             "metrics": metrics,
