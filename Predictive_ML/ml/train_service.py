@@ -159,6 +159,7 @@ class TrainService:
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         model_name = f"{user_model_name}_{timestamp}"
+        prediction_type = "sensor" if target_column != "label" else "fault"
 
         metadata = {
             "algorithm": algorithm,
@@ -166,6 +167,7 @@ class TrainService:
             "horizon": horizon,
             "metrics": metrics,
             "trained_at": timestamp,
+            "prediction_type": prediction_type,
             "rows": len(df),
             "features": list(X.columns)
         }
@@ -328,8 +330,13 @@ class TrainService:
         future_timestamps = [
             ts + steps * freq_minutes * 60 for ts in timestamps
         ]
-        cm = confusion_matrix(y_true, y_pred).tolist() if y_true else None
+        prediction_type = metadata.get("prediction_type")
 
+        if prediction_type == "fault":
+            cm = confusion_matrix(y_true, y_pred).tolist() if y_true else None
+        else:
+            cm = None
+       
         return {
             "timestamps": timestamps,
             "future_timestamps": future_timestamps,

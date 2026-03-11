@@ -1900,7 +1900,7 @@ class TrainModelRequest(BaseModel):
     model_name: str = Field(..., description="User-defined unique model name")
     dataset_path: str
     model_type: Literal["random_forest", "xgboost", "lstm"]
-    target_column: str = "label"
+    target_column: str  # "label" or the name of the target column in the dataset
     horizon: Literal["1h", "6h", "24h"]
 
 
