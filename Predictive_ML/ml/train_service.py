@@ -9,7 +9,7 @@ from sklearn.metrics import confusion_matrix
 from Predictive_ML.ml.trainers.xgboost import train_xgboost
 
 EQUIPMENT_LABELERS = {
-    "Slipring_Induction_motor_60kw": label_motor_faults,
+    "Slipring Induction motor 60kw": label_motor_faults,
     # future
     # "centrifugal_pump": label_pump_faults,
     # "compressor": label_compressor_faults
@@ -86,6 +86,53 @@ def covert_csv_to_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     meta_df = df.groupby("window_start").agg({
         "status": resolve_window_status,
         "label": "first"
+    })
+
+    # 🔹 Merge
+    final_df = pivot_df.join(meta_df)
+
+    # 🔹 Reset index → make window_start a column
+    final_df = final_df.reset_index()
+    final_df = final_df.reindex(sorted(final_df.columns), axis=1)
+
+    # 🔹 Sort by time
+    final_df = final_df.sort_values("window_start")
+
+    return final_df
+
+def convert_telemetry_to_dataframe_for_prediction(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Converts long-format telemetry into wide ML-ready dataframe for PREDICTION.
+    
+    Unlike covert_csv_to_dataframe(), this does NOT require a 'label' column,
+    since labels don't exist yet during prediction — they are generated 
+    afterwards by the equipment-specific labeling function.
+
+    Input columns:
+    sensor, window_start, count, avg, min, max, status
+
+    Output:
+    window_start, sensor_1_avg, sensor_2_avg, ..., status
+    """
+    if df.empty:
+        raise ValueError("Input dataframe is empty")
+
+    # 🔹 Ensure proper sorting
+    df = df.sort_values(["window_start", "sensor"])
+
+    # 🔹 Pivot → wide format
+    pivot_df = df.pivot(
+        index="window_start",
+        columns="sensor",
+        values="avg"
+    )
+
+    # 🔹 Rename columns → Vibration → Vibration_avg
+    pivot_df.columns = [f"{col}_avg" for col in pivot_df.columns]
+
+    # 🔹 Bring status (per window) — NO label
+    meta_df = df.groupby("window_start").agg({
+        "status": resolve_window_status
     })
 
     # 🔹 Merge
@@ -256,6 +303,8 @@ class TrainService:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 
         model_name = f"{user_model_name}_{timestamp}"
+        
+        prediction_type = "sensor" if target_column != "label" else "fault"
 
         metadata = {
             "algorithm": algorithm,
@@ -263,6 +312,7 @@ class TrainService:
             "target_column": target_column,
             "horizon": horizon,
             "metrics": metrics,
+            "prediction_type": prediction_type,
             "trained_at": timestamp,
             "rows": len(df),
             "features": list(X.columns)
@@ -337,6 +387,76 @@ class TrainService:
         else:
             cm = None
        
+        return {
+            "timestamps": timestamps,
+            "future_timestamps": future_timestamps,
+            "y_true": y_true,
+            "y_pred": y_pred.tolist(),
+            "probabilities": y_prob,
+            "confusion_matrix": cm,
+            "horizon": horizon
+        }
+
+    
+    @staticmethod
+    async def predict_future_asset(df: pd.DataFrame, model, metadata: dict) -> dict:
+        """
+        Prediction function specifically for asset-specific models.
+        
+        Expects a pre-processed, wide-format DataFrame with labels already applied
+        (from equipment-specific labeling function like label_motor_faults).
+        
+        :param df: Wide-format DataFrame with columns like Vibration_avg, Temperature_avg, ..., label, status, window_start
+        :param model: Trained ML model (sklearn-compatible)
+        :param metadata: Model metadata dict from Redis
+        """
+
+        if df.empty:
+            logging.error("Empty DataFrame received for asset prediction.")
+            return None
+
+        df = df.sort_values("window_start")
+
+        expected_features = metadata.get("features", [])
+        horizon = metadata.get("horizon")
+        freq_minutes = metadata.get("freq_minutes", 5)
+
+        # 🔹 Validate features
+        missing_features = [
+            col for col in expected_features if col not in df.columns
+        ]
+        if missing_features:
+            raise ValueError(f"Missing features for prediction: {missing_features}")
+
+        X = df[expected_features]
+
+        # 🔹 True labels (for confusion matrix)
+        y_true = df["label"].tolist() if "label" in df.columns else None
+
+        # 🔹 Predict
+        y_pred = model.predict(X)
+
+        # 🔹 Probabilities (if model supports it)
+        y_prob = None
+        if hasattr(model, "predict_proba"):
+            y_prob = model.predict_proba(X).tolist()
+
+        # 🔹 Timestamps
+        timestamps = df["window_start"].tolist()
+
+        steps = horizon_to_steps(horizon, freq_minutes)
+        future_timestamps = [
+            ts + steps * freq_minutes * 60 for ts in timestamps
+        ]
+
+        # 🔹 Confusion matrix (only for fault prediction)
+        prediction_type = metadata.get("prediction_type")
+
+        if prediction_type == "fault":
+            cm = confusion_matrix(y_true, y_pred).tolist() if y_true else None
+        else:
+            cm = None
+
         return {
             "timestamps": timestamps,
             "future_timestamps": future_timestamps,

@@ -14,18 +14,18 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 '''
 Based on your motor specifications (400V, 50Hz, 120A stator, 317V/121A rotor), we will simulate the following sensors:
 
-* **Stator Current & Voltage:** To detect electrical imbalances or overload.
-* **Rotor Current & Voltage:** Crucial for slipring motors to detect brush wear, slip ring degradation, or rotor winding issues.
-* **Vibration (mm/s):** To detect mechanical faults like bearing wear or misalignment.
-* **Temperature (°C):** Winding and bearing temperatures.
+**Stator Current & Voltage:** To detect electrical imbalances or overload.
+**Rotor Current & Voltage:** Crucial for slipring motors to detect brush wear, slip ring degradation, or rotor winding issues.
+**Vibration (mm/s):** To detect mechanical faults like bearing wear or misalignment.
+**Temperature (°C):** Winding and bearing temperatures.
 
 We will tag five distinct states:
 
-* `0`: Healthy Operation
-* `1`: Overload (High currents, rising temperatures)
-* `2`: Rotor/Slipring Fault (Fluctuating rotor voltage/current, increased slip)
-* `3`: Stator Fault (Unbalanced or spiking stator current)
-* `4`: Mechanical Fault (High vibration and bearing temperature)
+0: Healthy Operation
+1: Overload (High currents, rising temperatures)
+2: Rotor/Slipring Fault (Fluctuating rotor voltage/current, increased slip)
+3: Stator Fault (Unbalanced or spiking stator current)
+4: Mechanical Fault (High vibration and bearing temperature)
 '''
 
 # Mechanical > Stator > Rotor > Overload > Healthy
@@ -56,8 +56,8 @@ def label_motor_faults(window_df, thresholds):
         # -------------------------------
         if (
             vib is not None and temp is not None and
-            vib >= thresholds["vibration"]["mechanical"] and
-            temp >= thresholds["temperature"]["mechanical"]
+            vib >= thresholds["vibration"]["failure"] and
+            temp >= thresholds["temperature"]["failure"]
         ):
             label = 4
 
@@ -67,7 +67,7 @@ def label_motor_faults(window_df, thresholds):
         # -------------------------------
         elif (
             stator_i is not None and
-            stator_i >= thresholds["stator_current"]["fault_spike"]
+            stator_i >= thresholds["stator_current"]["failure"]
         ):
             label = 3
 
@@ -77,7 +77,7 @@ def label_motor_faults(window_df, thresholds):
         # -------------------------------
         elif (
             rotor_i is not None and
-            rotor_i >= thresholds["rotor_current"]["fault"]
+            rotor_i >= thresholds["rotor_current"]["failure"]
         ):
             label = 2
 
@@ -87,8 +87,8 @@ def label_motor_faults(window_df, thresholds):
         # -------------------------------
         elif (
             stator_i is not None and temp is not None and
-            stator_i >= thresholds["stator_current"]["overload"] and
-            temp >= thresholds["temperature"]["overload"]
+            stator_i >= thresholds["stator_current"]["prefailure"] and
+            temp >= thresholds["temperature"]["prefailure"]
         ):
             label = 1
 
@@ -98,4 +98,3 @@ def label_motor_faults(window_df, thresholds):
         })
 
     return pd.DataFrame(labeled_rows)
-

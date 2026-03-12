@@ -2198,7 +2198,7 @@ async def delete_sensor_mapping(
 # get the key and modelname sensor mapping from json file- sensor_mapping.json. This file will contain a mapping of the sensor names used in the telemetry data to the sensor names used in the ML model. The API can read this file and return the mapping to the frontend, which can then use it to display the correct sensor names to the user and ensure that the correct sensors are being processed for predictions.
 ###########################################################################
 
-app.get(
+@app.get(
     "/downlink/predictive_ML/model/sensor-mapping/default",
     summary="Get backend sensor mapping from JSON file"
 )
@@ -2271,14 +2271,28 @@ async def fetch_train_asset_model(
         
         await redis_client.set(f"Window_length:{payload.asset_id}", payload.window_length)
         
-        # Threshold map according to the model_name for each sensor present in the asset for its monitoring.
-        if payload.model_name == "Slipring_Induction_motor_60kw":
-            threshold_map = {
+        sensor_map_json = await redis_client.get(f"sensor_map:{payload.model_name}")
+        if not sensor_map_json:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Sensor mapping not found for model: {payload.model_name}. Register it first via /sensor-mapping"
+            )
+        sensor_map = json.loads(sensor_map_json)
+        # sensor_map = {"vibration": "Vibration", "temperature": "Temperature", "stator_current": "Stator_Current", ...}
+        # 🔹 Define thresholds per sensor (values are model-specific)
+        if payload.model_name == "Slipring Induction motor 60kw":
+            sensor_thresholds = {
                 "Vibration_avg": {"prefailure": 5.0, "failure": 7.0},
                 "Temperature_avg": {"prefailure": 80.0, "failure": 90.0},
                 "Stator_Current_avg": {"prefailure": 10.0, "failure": 15.0},
                 "Rotor_Current_avg": {"prefailure": 8.0, "failure": 12.0}
             }
+            # 🔹 Build threshold_map using only sensors registered in Redis
+            threshold_map = {
+            sensor_map[key]: value
+            for key, value in sensor_thresholds.items()
+            if key in sensor_map
+        }
         
         labeled_data = telemetry_processor.label_data(
             aggregated_data=processed_data,
@@ -2293,7 +2307,8 @@ async def fetch_train_asset_model(
             user_model_name=payload.model_name,
             algorithm=payload.model_type,
             horizon=payload.horizon,
-            equipment_type=payload.model_name
+            equipment_type=payload.model_name,
+            thresholds=threshold_map
         )
         
         return {
@@ -2309,7 +2324,6 @@ async def fetch_train_asset_model(
     except Exception as e:
         logging.error(f"Asset-specific model training failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Asset-specific model training failed")
-    
 class PredictSpecificRequest(BaseModel):
     model_name: str
     asset_id: str
