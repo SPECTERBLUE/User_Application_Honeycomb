@@ -2359,3 +2359,94 @@ async def predict_specific_asset_model(
             status_code=500,
             detail="Asset-specific prediction failed"
         )
+        
+###############################################################################
+# store the preditions for future use in visullisation
+###############################################################################
+
+@app.get(
+    "/downlink/predictive_ML/stored-predictions/list",
+    summary="Get stored predictions for an asset and model"
+)
+async def list_stored_predictions(
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        keys = await redis_client.keys("prediction:*")
+        predictions = []
+        for key in keys:
+            data_json = await redis_client.get(key)
+            if data_json:
+                predictions.append(json.loads(data_json))
+        return {
+            "status": "success",
+            "count": len(predictions),
+            "predictions": predictions
+        }
+    except Exception as e:
+        logging.error(f"Failed to list stored predictions: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to list stored predictions"
+        )
+        
+@app.get(
+    "/downlink/predictive_ML/stored-predictions/specific-model",
+    summary="Get stored predictions for a specific asset and model"
+)
+async def get_stored_predictions_specific(
+    asset_id: str,
+    model_name: str,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        key = f"prediction:{asset_id}:{model_name}"
+        data_json = await redis_client.get(key)
+        if not data_json:
+            raise HTTPException(
+                status_code=404,
+                detail="No stored predictions found for the specified asset and model"
+            )
+        prediction_data = json.loads(data_json)
+        return {
+            "status": "success",
+            "prediction": prediction_data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to get stored predictions: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to get stored predictions"
+        )
+        
+@app.delete(
+    "/downlink/predictive_ML/stored-predictions/specific-model",
+    summary="Delete stored predictions for a specific asset and model"
+)
+async def delete_stored_predictions_specific(
+    asset_id: str,
+    model_name: str,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        key = f"prediction:{asset_id}:{model_name}"
+        result = await redis_client.delete(key)
+        if result == 0:
+            raise HTTPException(
+                status_code=404,
+                detail="No stored predictions found to delete for the specified asset and model"
+            )
+        return {
+            "status": "success",
+            "message": f"Stored predictions for asset '{asset_id}' and model '{model_name}' deleted"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to delete stored predictions: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete stored predictions"
+        )

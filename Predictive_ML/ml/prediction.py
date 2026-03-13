@@ -5,6 +5,7 @@ from Predictive_ML.fetch_assets_telemetry import FetchAssetsTelemetry
 from Predictive_ML.telemetry_processor import TelemetryProcessor
 from Predictive_ML.ml.model_store import load_model
 from captcha_utils import redis_client
+from Predictive_ML.ml.predition_store import store_prediction
 from Predictive_ML.ml.train_service import TrainService
 from Predictive_ML.ml.train_service import EQUIPMENT_LABELERS, covert_csv_to_dataframe, convert_telemetry_to_dataframe_for_prediction
 import pandas as pd
@@ -56,6 +57,13 @@ async def predict(model_name,asset_id):
     predictions = await TrainService.future_predict(labeled_data,model,metadata)  # preprocess + model.predict()
     
     # need data for the api for confution matrix and metrics dashboard, so we return it here. In a real system, we might store this in a DB instead.
+    store_prediction({
+        "asset_id": asset_id,
+        "model_name": model_name,
+        "horizon": metadata.get("horizon"),
+        "confusion_matrix": predictions.get("confusion_matrix"),
+        "data": predictions
+    })  # async store in Redis for later retrieval
     
     return {
     "status": "success",
@@ -137,6 +145,13 @@ async def predict_specific(model_name,asset_id):
 
     predictions = await TrainService.predict_future_asset(df, model, metadata)
     
+    store_prediction({
+        "asset_id": asset_id,
+        "model_name": model_name,
+        "horizon": metadata.get("horizon"),
+        "confusion_matrix": predictions.get("confusion_matrix"),
+        "data": predictions
+    })  # async store in Redis for later retrieval
 
     return {
         "status": "success",
