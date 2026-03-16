@@ -20,7 +20,7 @@ from Predictive_ML.training_dataset_csv_creation import (
 )
 from Predictive_ML.ml.train_service import TrainService
 from Predictive_ML.ml.model_store import load_model, delete_model as stored_delete_model, list_models as stored_list_models 
-from Predictive_ML.ml.prediction import predict
+from Predictive_ML.ml.prediction import predict, predict_specific
 from typing import List
 import pyotp
 import qrcode
@@ -1900,7 +1900,7 @@ class TrainModelRequest(BaseModel):
     model_name: str = Field(..., description="User-defined unique model name")
     dataset_path: str
     model_type: Literal["random_forest", "xgboost", "lstm"]
-    target_column: str = "label"
+    target_column: str  # "label" or the name of the target column in the dataset
     horizon: Literal["1h", "6h", "24h"]
 
 
@@ -2088,4 +2088,365 @@ async def delete_redis_key(key_name: str, current_user=Depends(auth.get_current_
         raise HTTPException(
             status_code=500,
             detail="Failed to delete Redis key"
+        )
+        
+###################################################################################
+# sensor mapping between frontend and backend can be handled in the telemetry processing step. The API can accept a mapping of sensor names from the frontend to the actual sensor names used in the telemetry data. This mapping can then be applied during the aggregation and labeling process to ensure that the correct sensors are being processed and labeled according to the provided thresholds. This allows for flexibility in the frontend while maintaining consistency in the backend processing.
+###################################################################################
+class SensorMappingRequest(BaseModel):
+    model_name: str
+    sensor_mapping: dict[str, str]  # backend sensor name -> frontend sensor name
+
+@app.post(
+    "/downlink/predictive_ML/model/sensor-mapping",
+    summary="Register frontend sensors to model features"
+)
+async def set_sensor_mapping(
+    payload: SensorMappingRequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+
+        key = f"sensor_map:{payload.model_name}"
+
+        await redis_client.set(
+            key,
+            json.dumps(payload.sensor_mapping)
+        )
+
+        return {
+            "status": "success",
+            "model_name": payload.model_name,
+            "sensor_mapping": payload.sensor_mapping
+        }
+
+    except Exception as e:
+        logging.error(f"Failed to store sensor mapping: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to store sensor mapping"
+        )
+        
+@app.get(
+    "/downlink/predictive_ML/model/sensor-mapping",
+    summary="Get sensor mapping for a model"
+)
+async def get_sensor_mapping(
+    payload: SensorMappingRequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        key = f"sensor_map:{payload.model_name}"
+        mapping_json = await redis_client.get(key)
+
+        if not mapping_json:
+            raise HTTPException(
+                status_code=404,
+                detail="Sensor mapping not found for the model"
+            )
+
+        sensor_mapping = json.loads(mapping_json)
+
+        return {
+            "status": "success",
+            "model_name": payload.model_name,
+            "sensor_mapping": sensor_mapping
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to retrieve sensor mapping: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve sensor mapping"
+        )
+        
+@app.delete(
+    "/downlink/predictive_ML/model/sensor-mapping",
+    summary="Delete sensor mapping for a model"
+)
+async def delete_sensor_mapping(
+    payload: SensorMappingRequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        key = f"sensor_map:{payload.model_name}"
+        result = await redis_client.delete(key)
+
+        if result == 0:
+            raise HTTPException(
+                status_code=404,
+                detail="Sensor mapping not found for the model"
+            )
+
+        return {
+            "status": "success",
+            "message": f"Sensor mapping for model '{payload.model_name}' deleted"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to delete sensor mapping: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete sensor mapping"
+        )
+        
+###########################################################################
+# get the key and modelname sensor mapping from json file- sensor_mapping.json. This file will contain a mapping of the sensor names used in the telemetry data to the sensor names used in the ML model. The API can read this file and return the mapping to the frontend, which can then use it to display the correct sensor names to the user and ensure that the correct sensors are being processed for predictions.
+###########################################################################
+
+@app.get(
+    "/downlink/predictive_ML/model/sensor-mapping/default",
+    summary="Get backend sensor mapping from JSON file"
+)
+async def get_default_sensor_mapping(
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        with open("Predictive_ML/sensor_mapping.json", "r") as f:
+            data = json.load(f)
+
+        return {
+            "status": "success",
+            "whole_json": data,
+            "model_name": data.get("model_name"),
+            "sensor_mapping": data.get("sensor_mapping")
+        }
+
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="Sensor mapping file not found"
+        )
+    except Exception as e:
+        logging.error(f"Failed to read sensor mapping file: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to read sensor mapping file"
+        )
+
+###################################################################
+# Apis for asset specific models
+###################################################################
+class Assettelemertyfetchandtrainrequest(BaseModel):
+    asset_id: str
+    model_name: str
+    model_type: Literal["random_forest", "xgboost", "lstm"]
+    target_column: str = "label"
+    horizon: Literal["1h", "6h", "24h"]
+    window_length: int = Field(
+        ...,
+        gt=0,
+        description="Window length in seconds for aggregation"
+    )
+    
+@app.post(
+    "/downlink/predictive_ML/Asset_specific/assets/fetch-train",
+    summary="Fetch telemetry for an asset, process it and train a model"
+)
+async def fetch_train_asset_model(
+    payload: Assettelemertyfetchandtrainrequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        # 1. Fetch telemetry data for the asset
+        telemetry_fetcher = fetch_assets_telemetry.FetchAssetsTelemetry()
+        telemetry_data = telemetry_fetcher.get_telemetry_data_asset(payload.asset_id)
+
+        if telemetry_data is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Failed to fetch telemetry data for the asset."
+            )
+
+        # 2. Process telemetry data (aggregation, labeling, etc.)
+        processor = telemetry_processor.TelemetryProcessor(telemetry_data)
+        processed_data = processor.aggregate_window(
+            window_size_sec=payload.window_length
+        )
+        processed_data = telemetry_processor.handle_missing_windows(processed_data)
+        
+        await redis_client.set(f"Window_length:{payload.asset_id}", payload.window_length)
+        
+        sensor_map_json = await redis_client.get(f"sensor_map:{payload.model_name}")
+        if not sensor_map_json:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Sensor mapping not found for model: {payload.model_name}. Register it first via /sensor-mapping"
+            )
+        sensor_map = json.loads(sensor_map_json)
+        # sensor_map = {"vibration": "Vibration", "temperature": "Temperature", "stator_current": "Stator_Current", ...}
+        # 🔹 Define thresholds per sensor (values are model-specific)
+        if payload.model_name == "Slipring Induction motor 60kw":
+            sensor_thresholds = {
+                "Vibration_avg": {"prefailure": 5.0, "failure": 7.0},
+                "Temperature_avg": {"prefailure": 80.0, "failure": 90.0},
+                "Stator_Current_avg": {"prefailure": 10.0, "failure": 15.0},
+                "Rotor_Current_avg": {"prefailure": 8.0, "failure": 12.0}
+            }
+            # 🔹 Build threshold_map using only sensors registered in Redis
+            threshold_map = {
+            sensor_map[key]: value
+            for key, value in sensor_thresholds.items()
+            if key in sensor_map
+        }
+        
+        labeled_data = telemetry_processor.label_data(
+            aggregated_data=processed_data,
+            threshold_map=threshold_map
+        )
+        
+        train_service = TrainService()      
+        
+        result = await train_service.train_specific_model(
+            labeled_data=labeled_data,
+            target_column=payload.target_column,
+            user_model_name=payload.model_name,
+            algorithm=payload.model_type,
+            horizon=payload.horizon,
+            equipment_type=payload.model_name,
+            thresholds=threshold_map
+        )
+        
+        return {
+            "status": "success",
+            "message": "Model trained and stored in Redis",
+            "model_name": payload.model_name,
+            "metrics": result["metrics"],
+            "metadata": result["metadata"]
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Asset-specific model training failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Asset-specific model training failed")
+class PredictSpecificRequest(BaseModel):
+    model_name: str
+    asset_id: str
+    
+@app.post(
+    "/downlink/predictive_ML/Asset_specific/predict",
+    summary="Run prediction using an asset-specific model"
+)
+async def predict_specific_asset_model(
+    payload: PredictSpecificRequest,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        result = await predict_specific(
+            model_name=payload.model_name,
+            asset_id=payload.asset_id
+        )
+
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Prediction failed. No telemetry data found."
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logging.error(f"Asset-specific prediction API failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Asset-specific prediction failed"
+        )
+        
+###############################################################################
+# store the preditions for future use in visullisation
+###############################################################################
+
+@app.get(
+    "/downlink/predictive_ML/stored-predictions/list",
+    summary="Get stored predictions for an asset and model"
+)
+async def list_stored_predictions(
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        keys = await redis_client.keys("prediction:*")
+        predictions = []
+        for key in keys:
+            data_json = await redis_client.get(key)
+            if data_json:
+                predictions.append(json.loads(data_json))
+        return {
+            "status": "success",
+            "count": len(predictions),
+            "predictions": predictions
+        }
+    except Exception as e:
+        logging.error(f"Failed to list stored predictions: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to list stored predictions"
+        )
+        
+@app.get(
+    "/downlink/predictive_ML/stored-predictions/specific-model",
+    summary="Get stored predictions for a specific asset and model"
+)
+async def get_stored_predictions_specific(
+    asset_id: str,
+    model_name: str,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        key = f"prediction:{asset_id}:{model_name}"
+        data_json = await redis_client.get(key)
+        if not data_json:
+            raise HTTPException(
+                status_code=404,
+                detail="No stored predictions found for the specified asset and model"
+            )
+        prediction_data = json.loads(data_json)
+        return {
+            "status": "success",
+            "prediction": prediction_data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to get stored predictions: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to get stored predictions"
+        )
+        
+@app.delete(
+    "/downlink/predictive_ML/stored-predictions/specific-model",
+    summary="Delete stored predictions for a specific asset and model"
+)
+async def delete_stored_predictions_specific(
+    asset_id: str,
+    model_name: str,
+    current_user=Depends(auth.get_current_user)
+):
+    try:
+        key = f"prediction:{asset_id}:{model_name}"
+        result = await redis_client.delete(key)
+        if result == 0:
+            raise HTTPException(
+                status_code=404,
+                detail="No stored predictions found to delete for the specified asset and model"
+            )
+        return {
+            "status": "success",
+            "message": f"Stored predictions for asset '{asset_id}' and model '{model_name}' deleted"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to delete stored predictions: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete stored predictions"
         )

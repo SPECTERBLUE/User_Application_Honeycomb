@@ -1,0 +1,9 @@
+{
+  "model_name": "Slipring Induction motor 60kw",
+  "sensor_mapping": {
+    "Vibration_avg": "",
+    "Temperature_avg": "",
+    "Stator_Current_avg": "",
+    "Rotor_Current_avg": ""
+  }
+}
