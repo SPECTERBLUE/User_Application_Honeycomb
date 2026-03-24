@@ -2235,7 +2235,7 @@ class Assettelemertyfetchandtrainrequest(BaseModel):
     asset_id: str
     model_name: str
     model_type: Literal["random_forest", "xgboost", "lstm"]
-    target_column: str = "label"
+    target_column: str # "label" or the name of the target column in the dataset
     horizon: Literal["1h", "6h", "24h"]
     window_length: int = Field(
         ...,
