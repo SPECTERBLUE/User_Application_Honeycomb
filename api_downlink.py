@@ -2235,7 +2235,7 @@ class Assettelemertyfetchandtrainrequest(BaseModel):
     asset_id: str
     model_name: str
     model_type: Literal["random_forest", "xgboost", "lstm"]
-    target_column: str = "label"
+    target_column: str # "label" or the name of the target column in the dataset
     horizon: Literal["1h", "6h", "24h"]
     window_length: int = Field(
         ...,
@@ -2397,10 +2397,11 @@ async def list_stored_predictions(
 async def get_stored_predictions_specific(
     asset_id: str,
     model_name: str,
+    horizon: str,
     current_user=Depends(auth.get_current_user)
 ):
     try:
-        key = f"prediction:{asset_id}:{model_name}"
+        key = f"prediction:{asset_id}:{model_name}:{horizon}"
         data_json = await redis_client.get(key)
         if not data_json:
             raise HTTPException(
@@ -2427,11 +2428,12 @@ async def get_stored_predictions_specific(
 )
 async def delete_stored_predictions_specific(
     asset_id: str,
-    model_name: str,
+    model_name: str,    
+    horizon: str,
     current_user=Depends(auth.get_current_user)
 ):
     try:
-        key = f"prediction:{asset_id}:{model_name}"
+        key = f"prediction:{asset_id}:{model_name}:{horizon}"
         result = await redis_client.delete(key)
         if result == 0:
             raise HTTPException(
@@ -2450,3 +2452,4 @@ async def delete_stored_predictions_specific(
             status_code=500,
             detail="Failed to delete stored predictions"
         )
+        

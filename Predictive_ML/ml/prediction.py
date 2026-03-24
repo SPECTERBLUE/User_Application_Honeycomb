@@ -57,7 +57,7 @@ async def predict(model_name,asset_id):
     predictions = await TrainService.future_predict(labeled_data,model,metadata)  # preprocess + model.predict()
     
     # need data for the api for confution matrix and metrics dashboard, so we return it here. In a real system, we might store this in a DB instead.
-    store_prediction({
+    await store_prediction({
         "asset_id": asset_id,
         "model_name": model_name,
         "horizon": metadata.get("horizon"),
