@@ -10,7 +10,32 @@ from Predictive_ML.ml.train_service import TrainService
 from Predictive_ML.ml.train_service import EQUIPMENT_LABELERS, covert_csv_to_dataframe, convert_telemetry_to_dataframe_for_prediction
 import pandas as pd
 import re
+import numpy as np
 
+def convert_numpy(obj):
+    """
+    Recursively convert numpy / pandas types to native Python types
+    so they can be JSON serialized.
+    """
+    if isinstance(obj, dict):
+        return {k: convert_numpy(v) for k, v in obj.items()}
+
+    elif isinstance(obj, list):
+        return [convert_numpy(item) for item in obj]
+
+    elif isinstance(obj, tuple):
+        return tuple(convert_numpy(item) for item in obj)
+
+    elif isinstance(obj, (np.integer,)):
+        return int(obj)
+
+    elif isinstance(obj, (np.floating,)):
+        return float(obj)
+
+    elif isinstance(obj, (np.ndarray,)):
+        return obj.tolist()
+
+    return obj
 
 async def predict(model_name, asset_id):
 
@@ -46,20 +71,23 @@ async def predict(model_name, asset_id):
         labeled_data, model, metadata
     )
 
-    # 🔹 Store
-    await store_prediction({
+    # 🔹 Build response
+    prediction_data = {
         "asset_id": asset_id,
         "model_name": model_name,
         "horizon": metadata.get("horizon"),
         "data": predictions
-    })
+    }
+
+    # FIX: Convert numpy → Python types
+    cleaned_prediction_data = convert_numpy(prediction_data)
+
+    # 🔹 Store in Redis
+    await store_prediction(cleaned_prediction_data)
 
     return {
         "status": "success",
-        "asset_id": asset_id,
-        "model_name": model_name,
-        "horizon": metadata.get("horizon"),
-        "data": predictions
+        **cleaned_prediction_data
     }
 
 async def predict_specific(model_name,asset_id):
