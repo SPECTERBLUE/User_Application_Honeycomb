@@ -7,6 +7,30 @@ from Predictive_ML.ml.model_store import store_model
 from Predictive_ML.pre_trained_models import label_motor_faults
 from sklearn.metrics import confusion_matrix
 from Predictive_ML.ml.trainers.xgboost import train_xgboost
+from Predictive_ML.ml.trainers.lstm import train_lstm
+import numpy as np
+import torch
+from sklearn.metrics import confusion_matrix
+
+def create_sequences(df, feature_cols, target_col, seq_length, horizon_steps, prediction_type):
+    X, y = [], []
+
+    for i in range(len(df) - seq_length - horizon_steps + 1):
+        seq_x = df.iloc[i:i+seq_length][feature_cols].values
+
+        if prediction_type == "fault":
+            future = df.iloc[i+seq_length:i+seq_length+horizon_steps][target_col]
+            seq_y = int(future.max() > 0)
+
+        else:  # sensor
+            seq_y = df.iloc[
+                i+seq_length:i+seq_length+horizon_steps
+            ][target_col].values
+
+        X.append(seq_x)
+        y.append(seq_y)
+
+    return np.array(X), np.array(y)
 
 EQUIPMENT_LABELERS = {
     "Slipring Induction motor 60kw": label_motor_faults,
@@ -162,51 +186,92 @@ class TrainService:
         freq_minutes: int = 5
     ) -> Dict[str, Any]:
 
+        # 🔹 Load + preprocess
         df = pd.read_csv(csv_path)
         df = covert_csv_to_dataframe(df)
 
         if target_column not in df.columns:
             raise ValueError(f"{target_column} not found in dataset")
-        
-        # Convert horizon to steps        steps = horizon_to_steps(horizon, freq_minutes)
+
         df = df.sort_values("window_start")
-        
-        # convert horizon → number of rows to shift
+
         steps = horizon_to_steps(horizon, freq_minutes)
 
-        # create FUTURE label
-        df[target_column] = df[target_column].shift(-steps)
+        prediction_type = "sensor" if target_column != "label" else "fault"
 
-        # drop rows that don’t have future label
-        df = df.dropna(subset=[target_column])
-
-        # keep only healthy windows
+        # 🔹 Filter valid rows
         if "status" in df.columns:
             df = df[df["status"] == "OK"]
 
-        # Drop non-feature columns
-        drop_cols = [target_column, "window_start"]
+        # 🔹 Feature columns
+        feature_cols = [
+            col for col in df.columns
+            if col not in ["window_start", "status", target_column]
+        ]
 
-        if "status" in df.columns:
-            drop_cols.append("status")
+        # =========================================================
+        #  LSTM (SEQUENCE MODEL)
+        # =========================================================
+        if algorithm == "lstm":
+            
 
-        X = df.drop(columns=drop_cols)
-        y = df[target_column]
+            seq_length = 20  # can be made configurable
 
-        if algorithm == "random_forest":
-            model, metrics = train_random_forest(
-                X, y, test_size=test_size, random_state=random_state
+            X_seq, y_seq = create_sequences(
+                df,
+                feature_cols=feature_cols,
+                target_col=target_column,
+                seq_length=seq_length,
+                horizon_steps=steps,
+                prediction_type=prediction_type
             )
-        elif algorithm == "xgboost":
-            model, metrics = train_xgboost(
-                X, y, test_size=test_size, random_state=random_state
-            )
+
+            if len(X_seq) == 0:
+                raise ValueError("Not enough data to create sequences")
+
+            model = train_lstm(X_seq, y_seq, prediction_type)
+
+            metrics = {
+                "info": "LSTM trained (basic metrics not implemented)"
+            }
+
+            features_used = feature_cols
+
+        # =========================================================
+        #  TABULAR MODELS (RF / XGBOOST)
+        # =========================================================
         else:
-            raise ValueError(f"Unsupported algorithm: {algorithm}")
+            # 🔹 create FUTURE label (only for tabular models)
+            df[target_column] = df[target_column].shift(-steps)
+            df = df.dropna(subset=[target_column])
 
+            drop_cols = [target_column, "window_start"]
+            if "status" in df.columns:
+                drop_cols.append("status")
+
+            X = df.drop(columns=drop_cols)
+            y = df[target_column]
+
+            if algorithm == "random_forest":
+                model, metrics = train_random_forest(
+                    X, y, test_size=test_size, random_state=random_state
+                )
+
+            elif algorithm == "xgboost":
+                model, metrics = train_xgboost(
+                    X, y, test_size=test_size, random_state=random_state
+                )
+
+            else:
+                raise ValueError(f"Unsupported algorithm: {algorithm}")
+
+            features_used = list(X.columns)
+
+        # =========================================================
+        #  MODEL METADATA
+        # =========================================================
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         model_name = f"{user_model_name}_{timestamp}"
-        prediction_type = "sensor" if target_column != "label" else "fault"
 
         metadata = {
             "algorithm": algorithm,
@@ -215,10 +280,19 @@ class TrainService:
             "metrics": metrics,
             "trained_at": timestamp,
             "prediction_type": prediction_type,
+            "freq_minutes": freq_minutes,
             "rows": len(df),
-            "features": list(X.columns)
+            "features": features_used
         }
 
+        #  Extra metadata for LSTM
+        if algorithm == "lstm":
+            metadata.update({
+                "sequence_length": seq_length,
+                "horizon_steps": steps
+            })
+
+        #  Store model
         await store_model(model_name, model, metadata)
 
         return {
@@ -327,75 +401,139 @@ class TrainService:
         }
 
     @staticmethod
-    async def future_predict(data,model,metadata):
-        # This function can be used for future real-time predictions
-        # It would preprocess incoming data in the same way as training data
-        # and then call model.predict() to get predictions
-         
+    async def future_predict(data, model, metadata):
+
         if not data:
-                logging.error("No data received for prediction.")
-                return None
+            logging.error("No data received for prediction.")
+            return None
 
-        # 🔹 Convert to DataFrame
+        # 🔹 Convert
         df = pd.DataFrame(data)
-
-        # 🔹 Apply SAME transformation used during training
         df = covert_csv_to_dataframe(df)
-        
-        # 🔹 Ensure sorted (important for latest window selection)
         df = df.sort_values("window_start")
 
         expected_features = metadata.get("features", [])
         horizon = metadata.get("horizon")
         freq_minutes = metadata.get("freq_minutes", 5)
-        
+        algorithm = metadata.get("algorithm")
+        prediction_type = metadata.get("prediction_type")
+
         # 🔹 Validate features
         missing_features = [
             col for col in expected_features if col not in df.columns
         ]
-
         if missing_features:
-            raise ValueError(
-                f"Missing features for prediction: {missing_features}"
-            )
-        
-        X = df[expected_features].reindex(columns=expected_features)
+            raise ValueError(f"Missing features: {missing_features}")
 
-        # 🔹 True labels (if present → for confusion matrix)
-        y_true = df["label"].tolist() if "label" in df.columns else None
-
-        # 🔹 Predict
-        y_pred = model.predict(X)
-
-        if hasattr(model, "predict_proba"):
-            y_prob = model.predict_proba(X).tolist()
-        else:
-            y_prob = None
-
-        # 🔹 Time handling
-        timestamps = df["window_start"].tolist()
-
-        # future timestamps for horizon graphs
         steps = horizon_to_steps(horizon, freq_minutes)
-        future_timestamps = [
-            ts + steps * freq_minutes * 60 for ts in timestamps
-        ]
-        prediction_type = metadata.get("prediction_type")
 
-        if prediction_type == "fault":
-            cm = confusion_matrix(y_true, y_pred).tolist() if y_true else None
+        # =========================================================
+        # LSTM
+        # =========================================================
+        if algorithm == "lstm":
+
+            seq_len = metadata.get("sequence_length")
+
+            if len(df) < seq_len:
+                raise ValueError("Not enough data for LSTM")
+
+            seq = df.iloc[-seq_len:][expected_features].values
+            X = torch.tensor(seq, dtype=torch.float32).unsqueeze(0)
+
+            model.eval()
+            with torch.no_grad():
+                output = model(X).numpy().flatten()
+
+            base_ts = df["window_start"].iloc[-1]
+
+            timestamps = [
+                base_ts + (i + 1) * freq_minutes * 60
+                for i in range(steps)
+            ]
+
+            # 🔹 Fault
+            if prediction_type == "fault":
+                probs = torch.sigmoid(torch.tensor(output)).numpy().tolist()
+                values = [1 if p > 0.5 else 0 for p in probs]
+                confidence = [abs(p - 0.5) * 2 for p in probs]
+                cm = None
+
+            # 🔹 Sensor
+            else:
+                values = output.tolist()
+                probs = None
+                confidence = [1.0] * len(values)
+                cm = None
+
+            return {
+                "timestamps": timestamps,
+                "values": values,
+                "probabilities": probs,
+                "confidence": confidence,
+                "confusion_matrix": cm,
+                "meta": {
+                    "type": prediction_type,
+                    "mode": "multi_step",
+                    "horizon": horizon
+                }
+            }
+
+        # =========================================================
+        # RF / XGBOOST
+        # =========================================================
         else:
+
+            latest_row = df.iloc[-1:]
+            X = latest_row[expected_features]
+
+            y_pred = model.predict(X)
+
+            if hasattr(model, "predict_proba"):
+                y_prob = model.predict_proba(X)
+            else:
+                y_prob = None
+
+            timestamp = latest_row["window_start"].iloc[0]
+
+            timestamps = [
+                timestamp + (i + 1) * freq_minutes * 60
+                for i in range(steps)
+            ]
+
+            # 🔹 Expand prediction
+            values = [y_pred[0]] * steps
+
+            # 🔹 Fault
+            if prediction_type == "fault" and y_prob is not None:
+                base_prob = y_prob[0]
+                probs = [base_prob.tolist()] * steps
+                confidence = [max(base_prob)] * steps
+            else:
+                probs = None
+                confidence = [1.0] * steps
+
+            # 🔹 Confusion Matrix (optional)
             cm = None
-       
-        return {
-            "timestamps": timestamps,
-            "future_timestamps": future_timestamps,
-            "y_true": y_true,
-            "y_pred": y_pred.tolist(),
-            "probabilities": y_prob,
-            "confusion_matrix": cm,
-            "horizon": horizon
-        }
+            if prediction_type == "fault" and "label" in df.columns:
+                try:
+                    y_true = df["label"].iloc[-steps:].tolist()
+                    y_pred_expanded = values[:len(y_true)]
+                    cm = confusion_matrix(y_true, y_pred_expanded).tolist()
+                except Exception:
+                    cm = None
+
+            return {
+                "timestamps": timestamps,
+                "values": values,
+                "probabilities": probs,
+                "confidence": confidence,
+                "confusion_matrix": cm,
+                "meta": {
+                    "type": prediction_type,
+                    "mode": "single_step",
+                    "horizon": horizon
+                }
+            }
 
     
     @staticmethod
