@@ -2280,6 +2280,7 @@ async def fetch_train_asset_model(
         sensor_map = json.loads(sensor_map_json)
         # sensor_map = {"vibration": "Vibration", "temperature": "Temperature", "stator_current": "Stator_Current", ...}
         # 🔹 Define thresholds per sensor (values are model-specific)
+        threshold_map = {}
         if payload.model_name == "Slipring Induction motor 60kw":
             sensor_thresholds = {
                 "Vibration_avg": {"prefailure": 5.0, "failure": 7.0},
