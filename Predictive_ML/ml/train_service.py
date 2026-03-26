@@ -317,68 +317,99 @@ class TrainService:
 
         df = pd.DataFrame(labeled_data)
 
-        # Convert telemetry → wide format
+        # 🔹 Convert telemetry → wide format
         df = covert_csv_to_dataframe(df)
 
         # ---------------------------------
-        # Equipment specific labeling
+        # 🔹 Equipment specific labeling
         # ---------------------------------
         if equipment_type not in EQUIPMENT_LABELERS:
             raise ValueError(f"Unsupported equipment type: {equipment_type}")
 
         label_function = EQUIPMENT_LABELERS[equipment_type]
-
         df = label_function(df, thresholds)
 
         df = df.sort_values("window_start")
 
-        # ---------------------------------
-        # Convert horizon → prediction steps
-        # ---------------------------------
         steps = horizon_to_steps(horizon, freq_minutes)
 
-        df[target_column] = df[target_column].shift(-steps)
-
-        df = df.dropna(subset=[target_column])
+        prediction_type = "sensor" if target_column != "label" else "fault"
 
         # ---------------------------------
-        # Remove unhealthy windows
+        # 🔹 Filter valid rows
         # ---------------------------------
         if "status" in df.columns:
             df = df[df["status"] == "OK"]
 
-        drop_cols = [target_column, "window_start"]
+        # 🔹 Feature columns
+        feature_cols = [
+            col for col in df.columns
+            if col not in ["window_start", "status", target_column]
+        ]
 
-        if "status" in df.columns:
-            drop_cols.append("status")
+        # =========================================================
+        # LSTM (SEQUENCE MODEL)
+        # =========================================================
+        if algorithm == "lstm":
 
-        X = df.drop(columns=drop_cols)
-        y = df[target_column]
+            seq_length = 20
 
-        # ---------------------------------
-        # Model selection
-        # ---------------------------------
-        if algorithm == "random_forest":
-            model, metrics = train_random_forest(
-                X, y, test_size=test_size, random_state=random_state
+            X_seq, y_seq = create_sequences(
+                df,
+                feature_cols=feature_cols,
+                target_col=target_column,
+                seq_length=seq_length,
+                horizon_steps=steps,
+                prediction_type=prediction_type
             )
 
-        elif algorithm == "xgboost":
-            model, metrics = train_xgboost(
-                X, y, test_size=test_size, random_state=random_state
-            )
+            if len(X_seq) == 0:
+                raise ValueError("Not enough data to create sequences")
 
+            model = train_lstm(X_seq, y_seq, prediction_type)
+
+            metrics = {
+                "info": "LSTM trained (basic metrics not implemented)"
+            }
+
+            features_used = feature_cols
+
+        # =========================================================
+        # TABULAR MODELS (RF / XGBOOST)
+        # =========================================================
         else:
-            raise ValueError(f"Unsupported algorithm: {algorithm}")
 
-        # ---------------------------------
-        # Store model
-        # ---------------------------------
+            # 🔹 create FUTURE label (ONLY for tabular models)
+            df[target_column] = df[target_column].shift(-steps)
+            df = df.dropna(subset=[target_column])
+
+            drop_cols = [target_column, "window_start"]
+            if "status" in df.columns:
+                drop_cols.append("status")
+
+            X = df.drop(columns=drop_cols)
+            y = df[target_column]
+
+            if algorithm == "random_forest":
+                model, metrics = train_random_forest(
+                    X, y, test_size=test_size, random_state=random_state
+                )
+
+            elif algorithm == "xgboost":
+                model, metrics = train_xgboost(
+                    X, y, test_size=test_size, random_state=random_state
+                )
+
+            else:
+                raise ValueError(f"Unsupported algorithm: {algorithm}")
+
+            features_used = list(X.columns)
+
+        # =========================================================
+        # 🔹 MODEL METADATA
+        # =========================================================
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-
         model_name = f"{user_model_name}_{timestamp}"
-        
-        prediction_type = "sensor" if target_column != "label" else "fault"
 
         metadata = {
             "algorithm": algorithm,
@@ -388,10 +419,19 @@ class TrainService:
             "metrics": metrics,
             "prediction_type": prediction_type,
             "trained_at": timestamp,
+            "freq_minutes": freq_minutes,
             "rows": len(df),
-            "features": list(X.columns)
+            "features": features_used
         }
 
+        # 🔹 Extra metadata for LSTM
+        if algorithm == "lstm":
+            metadata.update({
+                "sequence_length": seq_length,
+                "horizon_steps": steps
+            })
+
+        # 🔹 Store model
         await store_model(model_name, model, metadata)
 
         return {
@@ -538,16 +578,7 @@ class TrainService:
     
     @staticmethod
     async def predict_future_asset(df: pd.DataFrame, model, metadata: dict) -> dict:
-        """
-        Prediction function specifically for asset-specific models.
-        
-        Expects a pre-processed, wide-format DataFrame with labels already applied
-        (from equipment-specific labeling function like label_motor_faults).
-        
-        :param df: Wide-format DataFrame with columns like Vibration_avg, Temperature_avg, ..., label, status, window_start
-        :param model: Trained ML model (sklearn-compatible)
-        :param metadata: Model metadata dict from Redis
-        """
+
 
         if df.empty:
             logging.error("Empty DataFrame received for asset prediction.")
@@ -558,49 +589,117 @@ class TrainService:
         expected_features = metadata.get("features", [])
         horizon = metadata.get("horizon")
         freq_minutes = metadata.get("freq_minutes", 5)
+        algorithm = metadata.get("algorithm")
+        prediction_type = metadata.get("prediction_type")
 
         # 🔹 Validate features
         missing_features = [
             col for col in expected_features if col not in df.columns
         ]
         if missing_features:
-            raise ValueError(f"Missing features for prediction: {missing_features}")
-
-        X = df[expected_features]
-
-        # 🔹 True labels (for confusion matrix)
-        y_true = df["label"].tolist() if "label" in df.columns else None
-
-        # 🔹 Predict
-        y_pred = model.predict(X)
-
-        # 🔹 Probabilities (if model supports it)
-        y_prob = None
-        if hasattr(model, "predict_proba"):
-            y_prob = model.predict_proba(X).tolist()
-
-        # 🔹 Timestamps
-        timestamps = df["window_start"].tolist()
+            raise ValueError(f"Missing features: {missing_features}")
 
         steps = horizon_to_steps(horizon, freq_minutes)
-        future_timestamps = [
-            ts + steps * freq_minutes * 60 for ts in timestamps
-        ]
 
-        # 🔹 Confusion matrix (only for fault prediction)
-        prediction_type = metadata.get("prediction_type")
+        # =========================================================
+        # 🔵 LSTM
+        # =========================================================
+        if algorithm == "lstm":
 
-        if prediction_type == "fault":
-            cm = confusion_matrix(y_true, y_pred).tolist() if y_true else None
+            seq_len = metadata.get("sequence_length")
+
+            if len(df) < seq_len:
+                raise ValueError("Not enough data for LSTM prediction")
+
+            seq = df.iloc[-seq_len:][expected_features].values
+            X = torch.tensor(seq, dtype=torch.float32).unsqueeze(0)
+
+            model.eval()
+            with torch.no_grad():
+                output = model(X).numpy().flatten()
+
+            base_ts = df["window_start"].iloc[-1]
+
+            timestamps = [
+                base_ts + (i + 1) * freq_minutes * 60
+                for i in range(steps)
+            ]
+
+            if prediction_type == "fault":
+                probs = torch.sigmoid(torch.tensor(output)).numpy().tolist()
+                values = [1 if p > 0.5 else 0 for p in probs]
+                confidence = [abs(p - 0.5) * 2 for p in probs]
+                cm = None
+            else:
+                values = output.tolist()
+                probs = None
+                confidence = [1.0] * len(values)
+                cm = None
+
+            return {
+                "timestamps": timestamps,
+                "values": values,
+                "probabilities": probs,
+                "confidence": confidence,
+                "confusion_matrix": cm,
+                "meta": {
+                    "type": prediction_type,
+                    "mode": "multi_step",
+                    "horizon": horizon
+                }
+            }
+
+        # =========================================================
+        # 🟢 RF / XGBOOST
+        # =========================================================
         else:
-            cm = None
 
-        return {
-            "timestamps": timestamps,
-            "future_timestamps": future_timestamps,
-            "y_true": y_true,
-            "y_pred": y_pred.tolist(),
-            "probabilities": y_prob,
-            "confusion_matrix": cm,
-            "horizon": horizon
-        }
+            latest_row = df.iloc[-1:]
+            X = latest_row[expected_features]
+
+            y_pred = model.predict(X)
+
+            if hasattr(model, "predict_proba"):
+                y_prob = model.predict_proba(X)
+            else:
+                y_prob = None
+
+            timestamp = latest_row["window_start"].iloc[0]
+
+            timestamps = [
+                timestamp + (i + 1) * freq_minutes * 60
+                for i in range(steps)
+            ]
+
+            values = [y_pred[0]] * steps
+
+            if prediction_type == "fault" and y_prob is not None:
+                base_prob = y_prob[0]
+                probs = [base_prob.tolist()] * steps
+                confidence = [max(base_prob)] * steps
+            else:
+                probs = None
+                confidence = [1.0] * steps
+
+            # 🔹 Optional confusion matrix
+            cm = None
+            if prediction_type == "fault" and "label" in df.columns:
+                try:
+                    y_true = df["label"].iloc[-steps:].tolist()
+                    y_pred_expanded = values[:len(y_true)]
+                    cm = confusion_matrix(y_true, y_pred_expanded).tolist()
+                except Exception:
+                    cm = None
+
+            return {
+                "timestamps": timestamps,
+                "values": values,
+                "probabilities": probs,
+                "confidence": confidence,
+                "confusion_matrix": cm,
+                "meta": {
+                    "type": prediction_type,
+                    "mode": "single_step",
+                    "horizon": horizon
+                }
+            }
